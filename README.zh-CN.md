@@ -2,16 +2,16 @@
 
 **顺着架构读论文，动手验证公式，再回到实验判断结论。**
 
-[English](README.md) · [安装](#安装) · [快速上手](#快速上手) · [版本发布](https://github.com/Kstheme/PaperMaster/releases)
+[English](README.md) · [安装](#安装) · [快速上手](#快速上手) · [npm](https://www.npmjs.com/package/papermaster-reader)
 
 PaperMaster 是一个本地论文阅读工作台。导入 PDF 或 arXiv 链接，从可点击的架构图进入核心模块，修改公式输入观察输出，再用论文报告的实验结果核对自己的理解。阅读成果可以保存为 Markdown。
 
 ## 安装
 
-**需要 Node.js 22.16 或更新版本。** 用 npm 从 GitHub Releases 直接安装预构建包：
+**需要 Node.js 22.16 或更新版本。** npm 包已包含构建好的界面。
 
 ```sh
-npm install -g https://github.com/Kstheme/PaperMaster/releases/download/v0.2.0/papermaster-reader-0.2.0.tgz
+npm install -g papermaster-reader
 papermaster
 ```
 

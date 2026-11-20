@@ -2,16 +2,16 @@
 
 **Read research papers by exploring their methods, testing their equations, and comparing their results.**
 
-[简体中文](README.zh-CN.md) · [Install](#install) · [Quick start](#quick-start) · [Releases](https://github.com/Kstheme/PaperMaster/releases)
+[简体中文](README.zh-CN.md) · [Install](#install) · [Quick start](#quick-start) · [npm](https://www.npmjs.com/package/papermaster-reader)
 
 PaperMaster is a local reading workspace for research papers. Import a PDF or an arXiv link, then follow a method from its architecture diagram to an interactive equation and the experiments that test it. Save your findings as Markdown.
 
 ## Install
 
-**Requires Node.js 22.16 or later.** Install the prebuilt package directly from GitHub Releases with npm:
+**Requires Node.js 22.16 or later.** The npm package includes the built interface.
 
 ```sh
-npm install -g https://github.com/Kstheme/PaperMaster/releases/download/v0.2.0/papermaster-reader-0.2.0.tgz
+npm install -g papermaster-reader
 papermaster
 ```
 
