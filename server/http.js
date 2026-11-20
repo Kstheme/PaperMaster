@@ -1,0 +1,355 @@
+import { createServer } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, extname, join, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { pipeline } from 'node:stream/promises';
+import { create } from 'tar';
+import { openLibrary, writeAtomic } from './library.js';
+import { credentialVault } from './credentials.js';
+import { codexModels } from './codex.js';
+import { AppError, requiredText } from './errors.js';
+import { attachRepository, importPaper, loadPaper, PDF_LIMIT } from './import.js';
+import { createReadingService, modes } from './reading.js';
+import { splitReadingMarkdown } from './reading-markdown.js';
+import { components } from './interaction.js';
+import { solveDemo } from './interaction-math.js';
+import { prepareSource } from './interaction-source.js';
+import { modelServices, providers } from './providers.js';
+
+const dist = fileURLToPath(new URL('../dist/', import.meta.url));
+const contentTypes = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
+};
+const idPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+export async function createApp({ directory, port = 0, remoteFetch, vault = credentialVault() }) {
+  const library = await openLibrary(directory);
+  const models = modelServices(library, vault, remoteFetch);
+  const reader = createReadingService(library, models);
+  const session = randomBytes(32).toString('hex');
+  let mutation = Promise.resolve();
+  function serialized(action) {
+    const work = mutation.then(action);
+    mutation = work.catch(() => {});
+    return work;
+  }
+  const server = createServer(async (req, res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'");
+    try {
+      const address = server.address();
+      if (!address || req.headers.host !== `127.0.0.1:${address.port}`) throw new AppError('请使用应用生成的本机地址。', 403);
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) throw new AppError('不允许跨站访问论文库。', 403);
+      const url = new URL(req.url, 'http://' + req.headers.host);
+      if (!url.pathname.startsWith('/api/')) return await serveStatic(url, req, res);
+      res.setHeader('Cache-Control', 'no-store');
+      if (url.pathname === '/api/session' && req.method === 'GET') {
+        return json(res, { token: session });
+      }
+      if (req.headers['x-papermaster-session'] !== session) throw new AppError('请刷新页面以恢复本地会话。', 403);
+      await route(req, res, url, { library, reader, models, serialized });
+    } catch (error) {
+      if (res.headersSent || res.destroyed) { if (!res.writableEnded) res.destroy(); return; }
+      if (error instanceof AppError) json(res, { error: error.message, code: error.code }, error.status);
+      else {
+        console.error('PaperMaster request failed:', error.code || error.name);
+        json(res, { error: '本地服务无法完成请求。', code: 'internal' }, 500);
+      }
+    }
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolve(); });
+    });
+  } catch (error) { await reader.close(); library.close(); throw error; }
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    async close() {
+      const closed = new Promise(resolve => server.close(resolve));
+      await reader.close();
+      await closed;
+      await mutation;
+      library.close();
+    },
+  };
+}
+
+async function route(req, res, url, { library, reader, models, serialized }) {
+  const parts = url.pathname.slice('/api/'.length).split('/');
+  const [resource, id, action, member] = parts;
+  const method = req.method;
+  const get = (table, key) => {
+    const value = idPattern.test(key ?? '') && library.get(table, key);
+    if (!value) throw new AppError('请求的记录不存在。', 404);
+    return value;
+  };
+  if (resource === 'library' && method === 'GET') {
+    return json(res, { papers: library.all('papers'), connections: library.all('connections'),
+      defaultConnection: library.get('settings', 'default')?.connectionId,
+      jobs: library.all('jobs').filter(job => job.mode !== 'feedback').map(({ id, references, mode, status, updated, sections, interaction }) => ({
+        id, references, mode, status, updated, interactive: Boolean(interaction),
+        sections: sections.filter(item => item.markdown).map(({ key, title }) => ({ key, title })),
+      })),
+      providers, modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
+  }
+  if (resource === 'papers' && method === 'POST' && !id) {
+    if (req.headers['content-type']?.startsWith('application/pdf')) {
+      const bytes = await readBody(req, PDF_LIMIT);
+      const sourceName = basename((url.searchParams.get('name') || '导入论文.pdf').replaceAll('\\', '/')).slice(0, 255);
+      return json(res, await serialized(() => importPaper(library, { bytes, sourceName, title: url.searchParams.get('title')?.slice(0, 255) })), 201);
+    }
+    const input = await body(req);
+    const arxiv = requiredText(input.arxiv, 'arXiv 链接', 300);
+    const title = input.title && requiredText(input.title, '论文标题', 255);
+    return json(res, await serialized(() => importPaper(library, { arxiv, title })), 201);
+  }
+  if (resource === 'papers' && id) {
+    const paper = get('papers', id);
+    if (action === 'repo' && method === 'POST') {
+      const input = await body(req);
+      return json(res, await attachRepository(library, paper, input), 201);
+    }
+    if (action === 'repo' && member && method === 'GET') {
+      const repo = paper.repos.find(item => item.id === member);
+      if (!repo) throw new AppError('仓库快照不存在。', 404);
+      const files = JSON.parse(await readFile(library.path(paper.id, repo.id + '.repo.json'), 'utf8'));
+      return json(res, { repo, files });
+    }
+    if (action === 'title' && method === 'PATCH') {
+      const input = await body(req);
+      return json(res, await serialized(() => library.put('papers', { ...get('papers', id), title: requiredText(input.title, '论文标题', 255) })));
+    }
+    if (action === 'pdf' && method === 'GET') {
+      const version = paper.versions.find(item => item.id === (member || paper.versionId));
+      if (!version) throw new AppError('论文版本不存在。', 404);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', contentDisposition('inline', version.name));
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      return pipeline(createReadStream(library.path(id, version.id + '.pdf')), res);
+    }
+    if (action === 'note' && method === 'GET') return json(res, await readNote(library, id));
+    if (action === 'note' && method === 'PUT') {
+      const input = await body(req);
+      const markdown = typeof input.markdown === 'string' && input.markdown.length <= 300_000 ? input.markdown : null;
+      if (markdown === null) throw new AppError('Markdown 笔记超过大小限制。');
+      return json(res, await serialized(async () => {
+        const note = await readNote(library, id);
+        if (input.revision !== note.revision) throw new AppError('原笔记已经变更，请重新打开后合并编辑。', 409, 'note_conflict');
+        await writeAtomic(library.path(id, 'note.md'), markdown);
+        return readNote(library, id);
+      }));
+    }
+    if (action === 'append' && method === 'POST') {
+      const input = await body(req);
+      const job = get('jobs', input.jobId);
+      if (job.mode === 'compare' || job.references[0].id !== id || job.status !== 'completed') throw new AppError('仅可合并此论文已完成的单篇成果。');
+      const section = input.section;
+      if (section && !job.sections.some(item => item.key === section && item.markdown)) throw new AppError('找不到可加入笔记的小节。');
+      const passage = exportJob(library, job, section, false);
+      const marker = `<!-- papermaster:${job.id}:${section || 'all'} -->`;
+      return json(res, await serialized(async () => {
+        const note = await readNote(library, id);
+        if (!note.markdown.includes(marker)) {
+          const contents = note.markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage;
+          if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
+          await writeAtomic(library.path(id, 'note.md'), contents);
+        }
+        return readNote(library, id);
+      }));
+    }
+  }
+  if (resource === 'connections') {
+    if (!id && method === 'POST') return json(res, await models.save(await body(req)), 201);
+    if (id === 'codex' && action === 'models' && !member && method === 'GET') {
+      return json(res, { models: await codexModels(AbortSignal.timeout(15_000)) });
+    }
+    if (id === 'default' && method === 'PUT') {
+      const connection = get('connections', (await body(req)).connectionId);
+      return json(res, library.put('settings', { id: 'default', connectionId: connection.id }));
+    }
+    if (id && action === 'check' && method === 'POST') {
+      return json(res, await models.check(get('connections', id), AbortSignal.timeout(60_000)));
+    }
+    if (id && !action && method === 'PATCH') {
+      const { model } = await body(req);
+      return json(res, await serialized(() => {
+        const connection = get('connections', id);
+        if (connection.provider !== 'codex') throw new AppError('此入口仅用于切换 Codex 模型。');
+        const nextModel = model === '' ? '' : requiredText(model, '模型名', 180);
+        return library.put('connections', { ...connection, model: nextModel });
+      }));
+    }
+  }
+  if (resource === 'jobs') {
+    if (!id && method === 'POST') return json(res, reader.start(await body(req)), 202);
+    if (id) {
+      const job = get('jobs', id);
+      if (!action && method === 'GET') return json(res, reader.present(job));
+      if (action === 'stop' && method === 'POST') return json(res, reader.stop(id));
+      if (action === 'resume' && method === 'POST') return json(res, reader.retry(id, (await body(req)).connectionId), 202);
+      if (action === 'interactive' && !member && method === 'POST') return json(res, reader.upgrade(id, await body(req)), 202);
+      if (action === 'component' && member && method === 'POST') return json(res, reader.retryComponent(id, member), 202);
+      if (action === 'asset' && member && method === 'GET') {
+        const source = job.interaction?.sources?.find(item => item.id === member);
+        if (!source) throw new AppError('原图表不存在。', 404);
+        const reference = job.references[0];
+        const material = await loadPaper(library, reference.id, reference.versionId);
+        const asset = await prepareSource(library, material, source, AbortSignal.timeout(15_000));
+        if (!asset.path) throw new AppError('暂时无法裁切此图表，可下载原论文查看。', 422);
+        res.setHeader('Content-Type', 'image/png');
+        return pipeline(createReadStream(asset.path), res);
+      }
+      if (action === 'observation' && method === 'POST') {
+        const demo = job.interaction?.components.formula?.data;
+        if (!demo) throw new AppError('找不到可保存的公式演示。', 404);
+        const input = await body(req);
+        if (!input.values || Array.isArray(input.values) || typeof input.values !== 'object' ||
+          !demo.inputs.every(item => Number.isFinite(input.values[item.id]))) throw new AppError('试算输入不完整。');
+        let calculated;
+        try { calculated = solveDemo(demo, input.values); }
+        catch (error) { throw new AppError(error.message); }
+        const observation = input.observation ? requiredText(input.observation, '观察', 2500) : '';
+        const fields = items => items.map(item => `${item.label || item.id} = ${JSON.stringify(calculated[item.id])}`).join('；');
+        const passage = ['### 教学演示 · ' + demo.title, '输入：' + fields(demo.inputs),
+          '输出：' + fields(demo.outputs.map(key => demo.steps.find(item => item.id === key))),
+          ...(observation ? ['观察：' + observation] : [])].join('\n\n');
+        const paperId = job.references[0].id;
+        return json(res, await serialized(async () => {
+          const note = await readNote(library, paperId);
+          const contents = note.markdown.trimEnd() + '\n\n' + passage + '\n';
+          if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
+          await writeAtomic(library.path(paperId, 'note.md'), contents);
+          return readNote(library, paperId);
+        }));
+      }
+      if (action === 'exercise' && method === 'GET') return json(res, reader.nextExercise(id));
+      if (action === 'answer' && method === 'POST') return json(res, reader.answer(id, await body(req)), 202);
+      if (action === 'skip' && method === 'POST') return json(res, reader.skip(id, (await body(req)).questionId));
+      if (action === 'note' && method === 'GET' && job.status === 'completed') {
+        return json(res, { markdown: exportJob(library, job) });
+      }
+    }
+  }
+  if (resource === 'backup' && method === 'GET') {
+    return serialized(() => backup(library, res));
+  }
+  throw new AppError('接口不存在。', 404);
+}
+
+function json(res, value, status = 200) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(value));
+}
+
+async function serveStatic(url, req, res) {
+  if (req.method !== 'GET') throw new AppError('接口不存在。', 404);
+  const path = resolve(dist, '.' + (url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname)));
+  if (!path.startsWith(dist.endsWith(sep) ? dist : dist + sep)) throw new AppError('文件不存在。', 404);
+  if (!await stat(path).then(item => item.isFile()).catch(() => false)) {
+    throw new AppError(path.endsWith('index.html') ? '缺少构建产物，请执行 npm run build。' : '文件不存在。', 404);
+  }
+  res.setHeader('Content-Type', contentTypes[extname(path)] || 'application/octet-stream');
+  await pipeline(createReadStream(path), res);
+}
+
+async function readBody(req, limit) {
+  let received = 0;
+  const parts = [];
+  for await (const data of req.iterator({ destroyOnReturn: false })) {
+    received += data.length;
+    if (received > limit) {
+      req.resume();
+      throw new AppError('上传内容超过大小限制。', 413);
+    }
+    parts.push(data);
+  }
+  return Buffer.concat(parts);
+}
+
+async function body(req) {
+  const bytes = await readBody(req, 2 * 1024 * 1024);
+  try {
+    const value = JSON.parse(bytes);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
+    return value;
+  } catch { throw new AppError('请求 JSON 无效。'); }
+}
+
+function contentDisposition(mode, name) {
+  return `${mode}; filename*=UTF-8''${encodeURIComponent(name).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16))}`;
+}
+
+async function readNote(library, id) {
+  const markdown = await readFile(library.path(id, 'note.md'), 'utf8').catch(error => {
+    if (error.code !== 'ENOENT') throw error;
+    const paper = library.get('papers', id);
+    const version = paper?.versions.find(item => item.id === paper.versionId);
+    return paper && version ? `# ${paper.title}\n\n- 论文版本：${version.arxivVersion || version.name}${version.url ? '\n- 论文入口：' + version.url : ''}\n` : '';
+  });
+  return { markdown, revision: createHash('sha256').update(markdown).digest('hex') };
+}
+
+function exportJob(library, job, key, title = true) {
+  const papers = job.references.map(ref => {
+    const paper = library.get('papers', ref.id);
+    return { paper, version: paper.versions.find(item => item.id === ref.versionId) };
+  });
+  const identity = papers.map(({paper, version}) => `- ${paper.title} (${version.arxivVersion || version.name})${version.url ? ' ' + version.url : ''}`);
+  const repo = papers[0].paper.repos.find(item => item.id === job.repoId);
+  const parts = [
+    title ? `# ${modes[job.mode].label} · ${papers.map(({paper}) => paper.title).join(' / ')}` : `## ${modes[job.mode].label}`,
+    ...identity,
+    ...(repo ? [`仓库：${repo.url}/tree/${repo.commit}`] : []),
+  ];
+  if (!key && job.interaction) {
+    const records = job.interaction.components;
+    const graph = records.graph?.data;
+    if (graph) parts.push('### 论文架构', graph.intro, ...graph.nodes.map(node => `- **${node.title}**：${node.why} 输入 ${node.input}，输出 ${node.output}。`));
+    const demo = records.formula?.data;
+    if (demo) parts.push('### 关键公式 · 教学演示', demo.title, '$$\n' + demo.latex + '\n$$', demo.objective, demo.explanation);
+    for (const name of ['main', 'ablation']) {
+      const table = records[name]?.data;
+      if (!table) continue;
+      const cell = value => String(value ?? '未确认').replaceAll('|', '\\|').replace(/\s*\n\s*/g, ' ');
+      const columns = ['方法', '数据集', '条件', ...table.columns.map(item => item.label + (item.unit ? ' (' + item.unit + ')' : ''))];
+      const grid = [columns, columns.map(() => '---'), ...table.rows.map(row => [row.method, row.dataset, row.condition, ...row.values])]
+        .map(row => '| ' + row.map(cell).join(' | ') + ' |').join('\n');
+      parts.push('### ' + components[name] + ' · 论文报告结果', table.title, table.claim, grid, table.limitation);
+    }
+    const missing = Object.keys(components).filter(name => records[name]?.status !== 'ready');
+    if (missing.length) parts.push('### 待补齐的交互', ...missing.map(name => '- ' + components[name] + '：' + (records[name]?.error || '尚未生成')));
+  }
+  for (const section of job.sections.filter(item => item.markdown && (!key || key === item.key))) {
+    const takeaways = section.takeaways?.map(item => '- ' + item.replace(/\s*\n\s*/g, ' ')).join('\n');
+    parts.push(`### ${section.title}`, ...[section.summary, takeaways, splitReadingMarkdown(section.markdown, false).before]
+      .filter(Boolean), ...(section.model ? [`模型：${section.model}`] : []));
+  }
+  if (!key && job.mode === 'guided') {
+    const items = job.sections.find(item => item.key === 'questions')?.questions || [];
+    const completed = new Set(library.all('jobs').filter(attempt => attempt.parentId === job.id &&
+      attempt.status === 'completed' && attempt.sections[0]?.passed).map(attempt => attempt.question.id));
+    parts.push('### 练习状态', ...items.map(item => `- ${completed.has(item.id) ? '已验证' : '尚未验证'} · ${item.objective}`));
+  }
+  return parts.join('\n\n') + '\n';
+}
+
+async function backup(library, res) {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-backup-'));
+  try {
+    await writeFile(join(directory, 'library.sqlite'), await library.snapshot());
+    await cp(library.files, join(directory, 'papers'), { recursive: true, filter: name => !name.endsWith('.tmp') });
+    const archive = join(directory, 'backup.tar.gz');
+    await create({ cwd: directory, file: archive, gzip: true, portable: true }, ['library.sqlite', 'papers']);
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', 'attachment; filename="papermaster-backup.tar.gz"');
+    await pipeline(createReadStream(archive), res);
+  } finally { await rm(directory, { force: true, recursive: true, maxRetries: 3 }); }
+}

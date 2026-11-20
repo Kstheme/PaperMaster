@@ -1,0 +1,94 @@
+.interactive-options { display: grid; gap: 7px; padding: 10px 13px; background: var(--inset); border-radius: 6px; }
+.upgrade-reading > p, .upgrade-reading > label { margin: 8px 0; }
+.interactive-workspace { display: grid; gap: 17px; container-type: inline-size; min-width: 0; }
+.interactive-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px 18px; }
+.interactive-heading h2 { font: 600 clamp(27px, 4vw, 38px)/1.2 Georgia, "Songti SC", SimSun, serif; }
+.interactive-views button[aria-pressed="true"],
+.flow-node[aria-pressed="true"] { color: #fffefa; border-color: #2b5c51; background: #2b5c51; }
+.component-progress { display: flex; flex-wrap: wrap; gap: 7px 18px; padding: 0; margin: 0; list-style: none; color: var(--muted); font-size: 13px; }
+.component-progress li { display: flex; align-items: center; gap: 6px; }
+.component-progress li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #a8afa3; }
+.component-progress li[data-state="ready"]::before { background: #31765c; }
+.component-progress li[data-state="failed"]::before { background: #a95c3c; }
+.component-progress span { font-size: 12px; opacity: .85; }
+.flow-frame { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px;
+  background: radial-gradient(circle, #c3cbc0 1px, transparent 1.5px) 0 0 / 16px 16px, #f1f3eb; }
+.flow-canvas { position: relative; margin: 0 auto; }
+.flow-canvas svg { position: absolute; inset: 0; pointer-events: none; }
+.flow-node { position: absolute; display: flex; justify-content: center; align-items: center; text-align: center;
+  width: 138px; height: 54px; min-height: 54px; padding: 4px 7px; font-size: 13px; font-weight: 620; line-height: 1.18; }
+.flow-node span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.flow-neighbors { display: flex; flex-wrap: wrap; gap: 7px 18px; }
+.flow-neighbors .actions { gap: 6px; }
+.flow-neighbors span { font-size: 13px; color: var(--muted); }
+.flow-neighbors button { font-size: 13px; flex-wrap: wrap; }
+.flow-neighbors small { color: var(--muted); font-weight: 400; }
+.interaction-overview { max-width: 68ch; }
+.module-detail, .formula-lab, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
+  border-radius: 9px; background: var(--surface); min-width: 0; }
+.module-detail { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px 28px; }
+.module-detail h3, .formula-lab h3, .experiment-table h3 { margin-top: 4px; font: 600 clamp(22px, 3vw, 28px)/1.24 Georgia, "Songti SC", SimSun, serif; }
+.module-detail dl { display: grid; gap: 3px; margin: 0; }
+.module-detail dl > div { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); }
+.module-detail dl > div:last-child { border-bottom: 0; }
+.module-detail dt { color: var(--accent); font-weight: 650; }
+.module-detail dd { margin: 0; }
+.module-detail dd .markdown > * { margin: 6px 0; }
+.interaction-heading { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid #a65c39; background: #f6f0e6; margin: 14px 0; }
+.lab-stage { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: clamp(12px, 2vw, 20px); align-items: start; }
+.lab-visual, .lab-inputs { min-width: 0; }
+.lab-visual { padding: 10px; border: 1px solid var(--line); background: #f8f7ef; border-radius: 8px; }
+.geometry { margin: 0; }
+.geometry svg { display: block; width: min(100%, 360px); margin: auto; }
+.geometry figcaption, .plot-legend { text-align: center; color: var(--muted); font-size: 12px; }
+.geometry-handle { cursor: grab; touch-action: none; }
+.geometry-handle:active { cursor: grabbing; }
+.plot-legend { padding: 0; margin: 5px 0; list-style: none; display: flex; justify-content: center; flex-wrap: wrap; gap: 4px 10px; }
+.lab-inputs { display: grid; gap: 10px; }
+.lab-input { min-width: 0; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.lab-input label { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text); }
+.lab-input input[type="number"] { width: min(40%, 98px); font-variant-numeric: tabular-nums; padding: 5px 7px; }
+.lab-input input[type="range"] { box-sizing: border-box; width: 100%; margin: 5px 0 0; accent-color: var(--accent); padding: 0; border: 0; background: transparent; }
+.lab-results { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,145px),1fr)); margin: 16px 0; gap: 8px; }
+.lab-results > div { background: var(--inset); padding: 8px 10px; border-radius: 6px; min-width: 0; }
+.lab-results dt { color: var(--muted); font-size: 13px; }
+.lab-results dd { margin: 3px 0 0; font-family: "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
+.lab-bars { padding: 0; margin: 8px 0 0; list-style: none; display: grid; gap: 7px; }
+.lab-bars li { display: grid; grid-template-columns: minmax(70px,.9fr) minmax(44px,1.1fr) auto; align-items: center; gap: 7px; font-size: 12px; }
+.lab-bars i { display: block; height: 6px; min-width: 0; border-radius: 1px; }
+.lab-curve { width: 100%; display: block; padding-top: 10px; }
+.lab-note { margin-top: 12px; }
+.component-state { padding: 13px 17px; border: 1px dashed #b4c1b7; border-radius: 8px; background: var(--surface); }
+.component-state p { margin: 3px 0 7px; }
+.interaction-missing { padding: 10px 12px; background: #f6f0e6; border-radius: 5px; }
+.experiment-stack, .source-list { display: grid; gap: 15px; min-width: 0; }
+.experiment-stack > div { min-width: 0; }
+.experiment-controls { margin: 12px 0; align-items: flex-end; }
+.experiment-controls > label { min-width: 0; flex: 1 1 135px; }
+.experiment-controls select { max-width: 100%; }
+.experiment-scroll { margin: 10px 0; }
+.experiment-scroll table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.experiment-scroll th, .experiment-scroll td { text-align: left; border-bottom: 1px solid var(--line); padding: 7px 10px; min-width: 70px; }
+.experiment-scroll thead { background: var(--inset); }
+.experiment-scroll th:first-child, .experiment-scroll td:first-child { min-width: 60px; }
+.experiment-scroll [data-metric="true"] { font-variant-numeric: tabular-nums; font-weight: 650; }
+.experiment-scroll tr[data-selected="true"] { background: var(--tint); }
+.experiment-compare { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 10px 0; color: var(--accent); }
+.experiment-compare div, .experiment-compare p { padding: 8px 11px; background: var(--tint); border-radius: 5px; }
+.experiment-compare span { display: block; font-size: 13px; }
+.experiment-compare p { grid-column: 1 / -1; }
+.source-preview { border-bottom: 1px solid var(--line); padding: 9px 0; min-width: 0; }
+.source-preview summary { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--accent); }
+.source-preview summary::after { content: "+"; }
+.source-preview[open] summary::after { content: "−"; }
+.source-preview p { margin-block: 8px; }
+.source-preview img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); }
+.reading-transcript { margin: 18px 0; min-width: 0; }
+.reading-transcript > summary { margin: 10px 0; }
+@container (max-width: 540px) {
+  .module-detail, .lab-stage { grid-template-columns: minmax(0,1fr); }
+}
+@media (max-width: 570px) {
+  .lab-input input[type="range"] { min-height: 32px; }
+}
