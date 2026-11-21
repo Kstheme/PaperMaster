@@ -3,11 +3,11 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, ArrowRight, BookmarkPlus } from 'lucide-react';
 import { Sample } from './illustrations.jsx';
 import { Markdown } from './markdown.jsx';
-import { splitReadingMarkdown } from '../server/reading-markdown.js';
+import { readingFigureParts, splitReadingMarkdown } from '../server/reading-markdown.js';
 
 const Softmax = lazy(() => import('./softmax.jsx'));
 
-export function Reader({ id, sections, onAppend, busy }) {
+export function Reader({ id, sections, onAppend, busy, figures, renderFigure }) {
   const storageKey = 'papermaster.chapter.' + id;
   const [selected, setSelected] = useState(() => localStorage.getItem(storageKey));
   const activeIndex = Math.max(0, sections.findIndex(item => item.key === selected));
@@ -24,7 +24,7 @@ export function Reader({ id, sections, onAppend, busy }) {
     requestAnimationFrame(() => heading.current?.focus());
   }
 
-  return <Tabs.Root className="reader" value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
+  return <Tabs.Root className={figures ? 'reader reader-inline' : 'reader'} value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
     {sections.length > 1 && <nav className="reader-index" aria-label="阅读目录">
       <h3>阅读目录</h3>
       <Tabs.List className="chapter-tabs" aria-label="选择章节">
@@ -37,7 +37,7 @@ export function Reader({ id, sections, onAppend, busy }) {
           <h2 ref={heading} tabIndex={-1}>{active.title}</h2>
           {onAppend && <button disabled={busy} onClick={() => onAppend(active.key)}><BookmarkPlus size={15}/>加入笔记</button>}
         </div>
-        <Chapter item={active}/>
+        <Chapter item={active} figures={figures?.[active.key]} renderFigure={renderFigure}/>
         {sections.length > 1 && <nav className="chapter-pagination" aria-label="相邻章节">
           {activeIndex > 0 && <button onClick={() => turnPage(activeIndex - 1)}><ArrowLeft size={15}/>{sections[activeIndex - 1].title}</button>}
           {activeIndex < sections.length - 1 && <button onClick={() => turnPage(activeIndex + 1)}>{sections[activeIndex + 1].title}<ArrowRight size={15}/></button>}
@@ -47,9 +47,9 @@ export function Reader({ id, sections, onAppend, busy }) {
   </Tabs.Root>;
 }
 
-function Chapter({ item }) {
-  const sample = Boolean(item.sample?.length);
-  const softmax = item.simulation === 'softmax';
+function Chapter({ item, figures, renderFigure }) {
+  const sample = !figures?.length && Boolean(item.sample?.length);
+  const softmax = !figures?.length && item.simulation === 'softmax';
   const { before, after } = splitReadingMarkdown(item.markdown, sample || softmax);
   return <>
     {item.summary && <div className="chapter-summary"><Markdown>{item.summary}</Markdown></div>}
@@ -58,7 +58,9 @@ function Chapter({ item }) {
       <ul>{item.takeaways.map((point, index) => <li key={index}><Markdown>{point}</Markdown></li>)}</ul>
     </aside>}
     <div className="chapter-body">
-      {before && <Markdown chapter>{before}</Markdown>}
+      {readingFigureParts(before, figures).map((part, index) => part.key
+        ? <React.Fragment key={part.key}>{renderFigure(part.key)}</React.Fragment>
+        : <Markdown chapter key={index}>{part.markdown}</Markdown>)}
       {sample && softmax ? <Tabs.Root className="chapter-demo" defaultValue="formula">
         <Tabs.List className="demo-tabs" aria-label="交互示例">
           <Tabs.Trigger value="formula">公式演算</Tabs.Trigger>

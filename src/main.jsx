@@ -5,7 +5,8 @@ import { ArrowDownToLine, ArrowUpRight, BookOpen, Braces, ChevronRight, FileText
 import { api, download, markdownBlob } from './api.js';
 import { Markdown } from './markdown.jsx';
 import { Reader } from './reader.jsx';
-import { InteractiveReader } from './interaction-reader.jsx';
+import { ReadingFigure, ReadingSources } from './interaction-reader.jsx';
+import { figureChapter, figureKeys } from '../server/reading-figures.js';
 import './style.css';
 import './interaction.css';
 
@@ -207,13 +208,15 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
   const [version, setVersion] = useState(paper.versionId);
   const [focus, setFocus] = useState('');
   const [others, setOthers] = useState([]);
-  const [repo, setRepo] = useState('');
+  const [repo, setRepo] = useState(null);
   const [interactive, setInteractive] = useState(true);
   const [sendImages, setSendImages] = useState(true);
   const [run, busy] = useAction(onError);
   const [repoRun, repoBusy] = useAction(onError);
   const selectedVersion = paper.versions.some(item => item.id === version) ? version : paper.versionId;
-  const canUseInteractive = mode === 'deep' || mode === 'guided';
+  const canUseInteractive = ['skim', 'deep', 'guided'].includes(mode);
+  const selectedRepo = repo ?? paper.repos.at(-1)?.id ?? '';
+  const usedRepo = selectedRepo || (mode === 'repo' ? paper.repos.at(-1)?.id || '' : '');
   return <>
     <section className="panel">
       <h2>选择阅读方式</h2>
@@ -226,7 +229,7 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
         run(async () => {
           const papers = [{ id: paper.id, versionId: selectedVersion }];
           if (mode === 'compare') papers.push(...others.map(id => ({ id })));
-          onJob(await api('jobs', { method: 'POST', json: { mode, papers, focus, repoId: repo, connectionId: connection,
+          onJob(await api('jobs', { method: 'POST', json: { mode, papers, focus, repoId: usedRepo, connectionId: connection,
             interactive: canUseInteractive && interactive, sendImages: canUseInteractive && interactive && sendImages } }));
         });
       }}>
@@ -241,18 +244,20 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
               event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))}/>{item.title}</label>)}
           {library.papers.length < 2 && <p className="muted">请先导入第二篇论文。</p>}
         </fieldset>}
-        {mode === 'repo' && <label>仓库快照<select value={repo || paper.repos.at(-1)?.id || ''} onChange={event => setRepo(event.target.value)} required>
-          {!paper.repos.length && <option value="">请先关联公开仓库</option>}
+        {(mode === 'repo' || (canUseInteractive && paper.repos.length > 0)) && <label>参考仓库<select
+          value={usedRepo} onChange={event => setRepo(event.target.value)} required={mode === 'repo'}>
+          {mode !== 'repo' && <option value="">仅使用论文</option>}
+          {mode === 'repo' && !paper.repos.length && <option value="">请先关联公开仓库</option>}
           {paper.repos.map(item => <option key={item.id} value={item.id}>{item.url.split('/').at(-1)} · {item.commit.slice(0, 8)}</option>)}
         </select></label>}
         <label>{mode === 'question' ? '你的问题' : '阅读重点（可选）'}
           <textarea rows="2" value={focus} onChange={event => setFocus(event.target.value)} maxLength={4000} required={mode === 'question'}/>
         </label>
         {canUseInteractive && <div className="interactive-options">
-          <label className="check"><input type="checkbox" checked={interactive} onChange={event => setInteractive(event.target.checked)}/>使用交互精读</label>
+          <label className="check"><input type="checkbox" checked={interactive} onChange={event => setInteractive(event.target.checked)}/>在正文中生成交互图</label>
           {interactive && <ImagePreference checked={sendImages} onChange={setSendImages}/>}
         </div>}
-        <div className="actions"><button className="primary" disabled={busy || !connection || (mode === 'compare' && others.length === 0)}>
+        <div className="actions"><button className="primary" disabled={busy || repoBusy || !connection || (mode === 'compare' && others.length === 0)}>
           <Sparkles size={15}/>开始{library.modes[mode]}</button></div>
       </form>}
     </section>
@@ -379,8 +384,9 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
   const path = `jobs/${job.id}`;
   const isLesson = job.mode === 'guided' && job.status === 'completed';
   const visible = showSections(job);
-  const hasInteractive = Boolean(job.interaction);
-  const canUpgrade = ['deep', 'guided'].includes(job.mode) && !hasInteractive && !active(job.status);
+  const figures = job.interaction ? Object.groupBy(figureKeys(job), key => figureChapter(job.mode, key)) : undefined;
+  const canUpgrade = ['skim', 'deep', 'guided'].includes(job.mode) && !(job.formatVersion >= 4) && !active(job.status);
+  const repo = paper.repos.find(item => item.id === job.repoId);
   function append(section) {
     run(async () => {
       await api(`papers/${paper.id}/append`, { method: 'POST', json: { jobId: job.id, section } });
@@ -419,21 +425,18 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
     </section>
     {canUpgrade && <details className="panel upgrade-reading">
       <summary>生成交互版</summary>
-      <p className="muted">使用同一论文版本创建一份新记录，原精读与主笔记会保留。</p>
+      <p className="muted">使用同一论文版本创建一份新记录，原阅读记录与主笔记会保留。</p>
       <ImagePreference checked={sendImages} onChange={setSendImages}/>
       <button className="primary" disabled={busy} onClick={() => run(async () => onJob(await api(path + '/interactive',
         { method: 'POST', json: { sendImages } })))}>开始生成交互版</button>
     </details>}
     {job.mode === 'repo' && job.repoId && <RepositoryPanel paperId={paper.id} repoId={job.repoId} onError={onError}/>}
     {isLesson && <a className="exercise-link" href="#guided-exercise">跳到引导练习</a>}
-    {hasInteractive && <InteractiveReader job={job} busy={busy} onNote={onNote}
-      onRetry={key => run(async () => onJob(await api(path + '/component/' + key, { method: 'POST' })))}/>}
-    {visible.length > 0 && (hasInteractive ? <details className="reading-transcript">
-      <summary>查看各章详细解释</summary>
-      <Reader key={job.id} id={job.id} sections={visible} busy={busy}
-        onAppend={job.status === 'completed' ? append : null}/>
-    </details> : <Reader key={job.id} id={job.id} sections={visible} busy={busy}
-      onAppend={job.status === 'completed' && job.mode !== 'compare' ? append : null}/>)}
+    {visible.length > 0 && <Reader key={job.id} id={job.id} sections={visible} busy={busy}
+      figures={figures} renderFigure={name => <ReadingFigure name={name} job={job} repo={repo} busy={busy} onNote={onNote}
+        onRetry={key => run(async () => onJob(await api(path + '/component/' + key, { method: 'POST' })))}/>}
+      onAppend={job.status === 'completed' && job.mode !== 'compare' ? append : null}/>}
+    <ReadingSources job={job}/>
     {isLesson && <Exercise key={job.id} job={job} library={library} onError={onError}/>}
   </>;
 }

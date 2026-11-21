@@ -1,6 +1,6 @@
 {
   "name": "papermaster-reader",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A local workspace for reading papers with interactive diagrams, formulas, and experiments",
   "homepage": "https://github.com/Kstheme/PaperMaster#readme",
   "repository": {
@@ -10,7 +10,13 @@
   "bugs": {
     "url": "https://github.com/Kstheme/PaperMaster/issues"
   },
-  "keywords": ["research", "papers", "arxiv", "pdf", "interactive-reading"],
+  "keywords": [
+    "research",
+    "papers",
+    "arxiv",
+    "pdf",
+    "interactive-reading"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.16.0"
@@ -23,7 +29,8 @@
     "server",
     "dist",
     "README.zh-CN.md",
-    "docs/images/interactive-reading.png"
+    "docs/images/visual-scaffolding-skim.gif",
+    "docs/images/visual-scaffolding-formula.gif"
   ],
   "scripts": {
     "start": "node bin/papermaster.js",

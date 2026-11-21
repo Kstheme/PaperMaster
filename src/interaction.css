@@ -1,16 +1,24 @@
 .interactive-options { display: grid; gap: 7px; padding: 10px 13px; background: var(--inset); border-radius: 6px; }
 .upgrade-reading > p, .upgrade-reading > label { margin: 8px 0; }
-.interactive-workspace { display: grid; gap: 17px; container-type: inline-size; min-width: 0; }
-.interactive-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px 18px; }
-.interactive-heading h2 { font: 600 clamp(27px, 4vw, 38px)/1.2 Georgia, "Songti SC", SimSun, serif; }
-.interactive-views button[aria-pressed="true"],
+.reader-inline .reader-content { max-width: 1020px; }
+.reader-inline .chapter-body > .markdown, .reader-inline .chapter-summary { max-width: 74ch; }
+.chapter-figure { min-width: 0; container-type: inline-size; margin: 1.5rem 0; }
+.chapter-figure .experiment-table { margin-bottom: .6rem; }
+.reading-sources { margin: 1rem 0; }
+.inline-flow { display: grid; gap: 12px; padding: clamp(12px, 2.4vw, 22px); margin: 0; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 9px; }
+.inline-flow figcaption > h3 { font: 600 clamp(21px, 3vw, 28px)/1.24 Georgia, "Songti SC", SimSun, serif; }
+.inline-flow figcaption .markdown { max-width: 71ch; }
+.inline-flow .module-detail { padding: 11px 13px; background: var(--inset); }
+.module-source { display: inline-block; overflow-wrap: anywhere; font: 12px/1.5 "Cascadia Mono", Consolas, monospace; }
+.flow-controls button { font-size: 13px; }
+.animated-flow-edge { animation: trace-data-flow 1.2s linear infinite; stroke-linecap: round; }
+@keyframes trace-data-flow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+@media (prefers-reduced-motion: reduce) { .animated-flow-edge { display: none; } }
+.lab-scenarios { margin-bottom: 12px; }
+.lab-scenarios [aria-pressed="true"],
 .flow-node[aria-pressed="true"] { color: #fffefa; border-color: #2b5c51; background: #2b5c51; }
-.component-progress { display: flex; flex-wrap: wrap; gap: 7px 18px; padding: 0; margin: 0; list-style: none; color: var(--muted); font-size: 13px; }
-.component-progress li { display: flex; align-items: center; gap: 6px; }
-.component-progress li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #a8afa3; }
-.component-progress li[data-state="ready"]::before { background: #31765c; }
-.component-progress li[data-state="failed"]::before { background: #a95c3c; }
-.component-progress span { font-size: 12px; opacity: .85; }
+.lab-scenarios p { margin-top: 7px; color: var(--accent); font-size: 14px; }
 .flow-frame { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px;
   background: radial-gradient(circle, #c3cbc0 1px, transparent 1.5px) 0 0 / 16px 16px, #f1f3eb; }
 .flow-canvas { position: relative; margin: 0 auto; }
@@ -23,7 +31,6 @@
 .flow-neighbors span { font-size: 13px; color: var(--muted); }
 .flow-neighbors button { font-size: 13px; flex-wrap: wrap; }
 .flow-neighbors small { color: var(--muted); font-weight: 400; }
-.interaction-overview { max-width: 68ch; }
 .module-detail, .formula-lab, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
   border-radius: 9px; background: var(--surface); min-width: 0; }
 .module-detail { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px 28px; }
@@ -61,9 +68,6 @@
 .lab-note { margin-top: 12px; }
 .component-state { padding: 13px 17px; border: 1px dashed #b4c1b7; border-radius: 8px; background: var(--surface); }
 .component-state p { margin: 3px 0 7px; }
-.interaction-missing { padding: 10px 12px; background: #f6f0e6; border-radius: 5px; }
-.experiment-stack, .source-list { display: grid; gap: 15px; min-width: 0; }
-.experiment-stack > div { min-width: 0; }
 .experiment-controls { margin: 12px 0; align-items: flex-end; }
 .experiment-controls > label { min-width: 0; flex: 1 1 135px; }
 .experiment-controls select { max-width: 100%; }
@@ -84,8 +88,6 @@
 .source-preview[open] summary::after { content: "−"; }
 .source-preview p { margin-block: 8px; }
 .source-preview img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); }
-.reading-transcript { margin: 18px 0; min-width: 0; }
-.reading-transcript > summary { margin: 10px 0; }
 @container (max-width: 540px) {
   .module-detail, .lab-stage { grid-template-columns: minmax(0,1fr); }
 }

@@ -1,5 +1,6 @@
 const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const demoMarker = /^\s*\[\[PAPERMASTER_DEMO\]\]\s*$/;
+const figureMarker = /^ {0,3}\[\[FIGURE:([a-zA-Z0-9]+)\]\][ \t]*$/;
 
 export function normalizeMarkdown(value) {
   let body = String(value ?? '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
@@ -81,4 +82,38 @@ export function splitReadingMarkdown(value, hasDemo) {
     before: lines.filter((_, index) => index < position && !markers.has(index)).join('\n').trim(),
     after: lines.filter((_, index) => index >= position && !markers.has(index)).join('\n').trim(),
   };
+}
+
+export function readingFigureParts(value, keys = []) {
+  const parts = [];
+  const remaining = new Set(keys);
+  let lines = [];
+  let code;
+  let math = false;
+  function flush() {
+    const markdown = lines.join('\n').trim();
+    if (markdown) parts.push({ markdown });
+    lines = [];
+  }
+  for (const line of normalizeMarkdown(value).split('\n')) {
+    const run = line.match(fence);
+    if (code) {
+      if (run?.[1][0] === code[0] && run[1].length >= code.length && !run[2].trim()) code = undefined;
+    } else if (!math && run) code = run[1];
+    else if (line.trim() === '$$') math = !math;
+    else if (!math) {
+      const marker = line.match(figureMarker);
+      if (marker) {
+        if (remaining.delete(marker[1])) {
+          flush();
+          parts.push({ key: marker[1] });
+        }
+        continue;
+      }
+    }
+    lines.push(line);
+  }
+  flush();
+  for (const key of remaining) parts.push({ key });
+  return parts;
 }

@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeMarkdown, splitReadingMarkdown } from '../server/reading-markdown.js';
+import { normalizeMarkdown, readingFigureParts, splitReadingMarkdown } from '../server/reading-markdown.js';
+
+test('places each requested figure once and leaves fenced examples intact', () => {
+  const input = '前文\n\n[[FIGURE:graph]]\n\n中段\n\n```text\n[[FIGURE:formula]]\n```\n\n[[FIGURE:graph]]\n\n[[FIGURE:unknown]]\n\n后文';
+  assert.deepEqual(readingFigureParts(input, ['graph', 'formula']), [
+    { markdown: '前文' }, { key: 'graph' },
+    { markdown: '中段\n\n```text\n[[FIGURE:formula]]\n```\n\n\n\n后文' }, { key: 'formula' },
+  ]);
+});
 
 test('normalizes model wrappers, titles, and math while preserving code and GFM tables', () => {
   const input = ['````markdown', '###公式', '用 \\(x\\) 计算，保留 `\\(literal\\)`。',

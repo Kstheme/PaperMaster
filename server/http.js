@@ -13,8 +13,8 @@ import { codexModels } from './codex.js';
 import { AppError, requiredText } from './errors.js';
 import { attachRepository, importPaper, loadPaper, PDF_LIMIT } from './import.js';
 import { createReadingService, modes } from './reading.js';
-import { splitReadingMarkdown } from './reading-markdown.js';
-import { components } from './interaction.js';
+import { readingFigureParts, splitReadingMarkdown } from './reading-markdown.js';
+import { components, figureChapter, figureKeys } from './reading-figures.js';
 import { solveDemo } from './interaction-math.js';
 import { prepareSource } from './interaction-source.js';
 import { modelServices, providers } from './providers.js';
@@ -208,9 +208,10 @@ async function route(req, res, url, { library, reader, models, serialized }) {
         return pipeline(createReadStream(asset.path), res);
       }
       if (action === 'observation' && method === 'POST') {
-        const demo = job.interaction?.components.formula?.data;
-        if (!demo) throw new AppError('找不到可保存的公式演示。', 404);
         const input = await body(req);
+        const component = input.component ?? 'formula';
+        const demo = ['formula', 'formula2'].includes(component) && job.interaction?.components[component]?.data;
+        if (!demo) throw new AppError('找不到可保存的公式演示。', 404);
         if (!input.values || Array.isArray(input.values) || typeof input.values !== 'object' ||
           !demo.inputs.every(item => Number.isFinite(input.values[item.id]))) throw new AppError('试算输入不完整。');
         let calculated;
@@ -309,27 +310,28 @@ function exportJob(library, job, key, title = true) {
     ...identity,
     ...(repo ? [`仓库：${repo.url}/tree/${repo.commit}`] : []),
   ];
-  if (!key && job.interaction) {
-    const records = job.interaction.components;
-    const graph = records.graph?.data;
-    if (graph) parts.push('### 论文架构', graph.intro, ...graph.nodes.map(node => `- **${node.title}**：${node.why} 输入 ${node.input}，输出 ${node.output}。`));
-    const demo = records.formula?.data;
-    if (demo) parts.push('### 关键公式 · 教学演示', demo.title, '$$\n' + demo.latex + '\n$$', demo.objective, demo.explanation);
-    for (const name of ['main', 'ablation']) {
-      const table = records[name]?.data;
-      if (!table) continue;
-      const cell = value => String(value ?? '未确认').replaceAll('|', '\\|').replace(/\s*\n\s*/g, ' ');
-      const columns = ['方法', '数据集', '条件', ...table.columns.map(item => item.label + (item.unit ? ' (' + item.unit + ')' : ''))];
-      const grid = [columns, columns.map(() => '---'), ...table.rows.map(row => [row.method, row.dataset, row.condition, ...row.values])]
-        .map(row => '| ' + row.map(cell).join(' | ') + ' |').join('\n');
-      parts.push('### ' + components[name] + ' · 论文报告结果', table.title, table.claim, grid, table.limitation);
+  function describeFigure(name) {
+    const record = job.interaction.components[name];
+    const data = record?.data;
+    if (!data) return ['#### ' + components[name] + ' · 待补齐', record?.error || '尚未生成'];
+    if (name.startsWith('graph')) {
+      return ['#### ' + (data.title || components[name]), data.intro, ...data.nodes.map(node =>
+        `- **${node.title}**：${node.why} 输入 ${node.input}，输出 ${node.output}。` +
+        (node.code ? ` 实现：\`${node.code.file}\`${node.code.symbol ? ' · ' + node.code.symbol : ''}。` : ''))];
     }
-    const missing = Object.keys(components).filter(name => records[name]?.status !== 'ready');
-    if (missing.length) parts.push('### 待补齐的交互', ...missing.map(name => '- ' + components[name] + '：' + (records[name]?.error || '尚未生成')));
+    if (name.startsWith('formula')) return ['#### ' + data.title + ' · 教学演示', '$$\n' + data.latex + '\n$$', data.objective, data.explanation];
+    const cell = value => String(value ?? '未确认').replaceAll('|', '\\|').replace(/\s*\n\s*/g, ' ');
+    const columns = ['方法', '数据集', '条件', ...data.columns.map(item => item.label + (item.unit ? ' (' + item.unit + ')' : ''))];
+    const grid = [columns, columns.map(() => '---'), ...data.rows.map(row => [row.method, row.dataset, row.condition, ...row.values])]
+      .map(row => '| ' + row.map(cell).join(' | ') + ' |').join('\n');
+    return ['#### ' + components[name] + ' · 论文报告结果', data.title, data.claim, grid, data.limitation];
   }
   for (const section of job.sections.filter(item => item.markdown && (!key || key === item.key))) {
     const takeaways = section.takeaways?.map(item => '- ' + item.replace(/\s*\n\s*/g, ' ')).join('\n');
-    parts.push(`### ${section.title}`, ...[section.summary, takeaways, splitReadingMarkdown(section.markdown, false).before]
+    const keys = figureKeys(job).filter(name => figureChapter(job.mode, name) === section.key);
+    const body = readingFigureParts(splitReadingMarkdown(section.markdown, false).before, keys)
+      .flatMap(part => part.key ? describeFigure(part.key) : [part.markdown]);
+    parts.push(`### ${section.title}`, ...[section.summary, takeaways, ...body]
       .filter(Boolean), ...(section.model ? [`模型：${section.model}`] : []));
   }
   if (!key && job.mode === 'guided') {

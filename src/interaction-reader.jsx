@@ -1,82 +1,86 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowRight, BookOpen, GitFork, Image, RotateCcw, Table2 } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { BookOpen, Pause, Play, RotateCcw } from 'lucide-react';
 import { api } from './api.js';
 import { FormulaLab } from './formula-lab.jsx';
 import { Markdown } from './markdown.jsx';
+import { components as names } from '../server/reading-figures.js';
 
-const names = { graph: '论文架构', formula: '关键公式', main: '主结果', ablation: '关键消融' };
 const working = job => ['queued', 'running'].includes(job.status);
 
-export function InteractiveReader({ job, onRetry, busy, onNote }) {
-  const [view, setView] = useState('map');
-  const [selected, setSelected] = useState(null);
-  const data = job.interaction;
-  const records = data.components;
-  const graph = records.graph?.data;
-  const demo = records.formula?.data;
-  const active = graph?.nodes.find(node => node.id === selected) ?? graph?.nodes.find(node => node.id === graph.focus);
-  const failures = Object.keys(names).filter(key => records[key]?.status === 'failed');
-  const canRetry = !busy && !working(job);
-  const badge = key => <ComponentState key={key} name={key} record={records[key]} job={job} onRetry={onRetry} canRetry={canRetry}/>;
-  return <section className="interactive-workspace" aria-label="交互精读">
-    <header className="interactive-heading">
-      <h2>交互精读</h2>
-      <div className="actions interactive-views" aria-label="精读视图">
-        {[['map', '论文架构', GitFork], ['evidence', '实验对照', Table2], ['sources', '原图表', Image]].map(([id, label, Icon]) =>
-          <button key={id} aria-pressed={view === id} onClick={() => setView(id)}><Icon size={15}/>{label}</button>)}
-      </div>
-    </header>
-    <ul className="component-progress" aria-label="交互组件进度">{Object.entries(names).map(([key, label]) => {
-      const status = records[key]?.status;
-      return <li key={key} data-state={status || 'pending'}>{label} <span>{
-        status === 'ready' ? '已就绪' : status === 'failed' ? '待补齐' : status === 'running' && working(job) ? '生成中' : '等待中'
-      }</span></li>;
-    })}</ul>
-    {view === 'map' && <>
-      {graph ? <>
-        <FlowMap graph={graph} active={active} onSelect={setSelected}/>
-        {active && <div className="module-detail">
-          <div><p className="eyebrow">当前模块</p><h3>{active.title}</h3><Markdown>{active.why}</Markdown></div>
-          <dl>{[['输入', active.input], ['操作', active.operation], ['输出', active.output]].map(([label, value]) =>
-            <div key={label}><dt>{label}</dt><dd><Markdown>{value}</Markdown></dd></div>)}</dl>
-        </div>}
-        <details className="interaction-overview"><summary>方法总览</summary><Markdown>{graph.intro}</Markdown></details>
-        {demo && active?.id === demo.module
-          ? <FormulaLab key={demo.title} demo={demo} jobId={job.id} onNote={onNote}/>
-          : demo && <button onClick={() => setSelected(demo.module)}>进入公式演算 <ArrowRight size={15}/></button>}
-        {!demo && badge('formula')}
-      </> : badge('graph')}
-      {records.graph?.source && <SourcePreview source={records.graph.source} jobId={job.id}/>}
-    </>}
-    {view === 'evidence' && <div className="experiment-stack">
-      {['main', 'ablation'].map(key => <div key={key}>
-        {records[key]?.data ? <ExperimentTable table={records[key].data} name={names[key]}/> : badge(key)}
-        {records[key]?.source && <SourcePreview source={records[key].source} jobId={job.id}/>}
-      </div>)}
-    </div>}
-    {view === 'sources' && <div className="source-list">
-      {data.sources?.length ? data.sources.map(source => <SourcePreview key={source.id} source={source} jobId={job.id}/>)
-        : <p className="muted">当前没有可定位的图表标题。原论文可在论文主页下载。</p>}
-    </div>}
-    {job.status === 'completed' && failures.length > 0 && <p className="muted interaction-missing">
-      待补齐：{failures.map(key => names[key]).join('、')}。可以在对应视图中重试。
-    </p>}
-  </section>;
+export function ReadingFigure({ name, job, repo, onRetry, busy, onNote }) {
+  const record = job.interaction.components[name];
+  const data = record?.data;
+  return <div className="chapter-figure">
+    {!data ? <ComponentState name={name} record={record} job={job} onRetry={onRetry} canRetry={!busy && !working(job)}/>
+      : name.startsWith('graph') ? <AnimatedGraph graph={data} name={names[name]} repo={repo}/>
+        : name.startsWith('formula') ? <FormulaLab demo={data} jobId={job.id} component={name} onNote={onNote}/>
+          : <ExperimentTable table={data} name={names[name]}/>}
+    {record?.source && <SourcePreview source={record.source} jobId={job.id}/>}
+  </div>;
+}
+
+export function ReadingSources({ job }) {
+  return job.interaction?.sources?.length > 0 && <details className="reading-sources">
+    <summary>原论文图表目录</summary>
+    {job.interaction.sources.map(source => <SourcePreview key={source.id} source={source} jobId={job.id}/>)}
+  </details>;
 }
 
 function ComponentState({ name, record, job, onRetry, canRetry }) {
-  const fallback = name === 'formula' && job.sections.find(item => item.key === 'mechanism')?.markdown;
   return <div className="component-state">
     <h3>{names[name]}</h3>
     {record?.status === 'failed' ? <>
       <p>{record.error}</p>
       <button disabled={!canRetry} onClick={() => onRetry(name)}><RotateCcw size={15}/>重试{names[name]}</button>
-      {fallback && <details><summary>查看分步解释</summary><Markdown>{fallback}</Markdown></details>}
     </> : <p role="status" className="muted">{working(job) ? '正在准备此组件。' : '此组件尚未生成。可继续生成任务。'}</p>}
   </div>;
 }
 
-function FlowMap({ graph, active, onSelect }) {
+function AnimatedGraph({ graph, name, repo }) {
+  const order = [...graph.nodes].sort((a, b) => a.stage - b.stage);
+  const [index, setIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const current = order[index];
+  const last = index === order.length - 1;
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setTimeout(() => {
+      if (last) setPlaying(false);
+      else setIndex(index + 1);
+    }, 2400);
+    return () => clearTimeout(timer);
+  }, [playing, index, last]);
+  function select(node) {
+    setPlaying(false);
+    setIndex(order.findIndex(item => item.id === node));
+  }
+  return <figure className="inline-flow">
+    <figcaption><h3>{graph.title || name}</h3><Markdown>{graph.intro}</Markdown></figcaption>
+    <div className="actions flow-controls">
+      <button type="button" onClick={() => {
+        if (!playing && last) setIndex(0);
+        setPlaying(!playing);
+      }}>{playing ? <Pause size={15}/> : <Play size={15}/>} {playing ? '暂停演示' : '播放流程'}</button>
+      <button type="button" disabled={index === 0} onClick={() => select(order[index - 1].id)}>上一步</button>
+      <button type="button" disabled={last} onClick={() => select(order[index + 1].id)}>下一步</button>
+      <span className="muted" aria-live={playing ? 'off' : 'polite'}>{index + 1} / {order.length} · {current.title}</span>
+    </div>
+    <FlowMap graph={graph} active={current} onSelect={select} playing={playing}/>
+    <div className="module-detail">
+      <div><h4>{current.title}</h4><Markdown>{current.why}</Markdown>
+        {repo && (current.code ? <a className="module-source" href={repo.url + '/blob/' + repo.commit + '/' +
+          current.code.file.split('/').map(encodeURIComponent).join('/')} target="_blank" rel="noreferrer">
+          {current.code.file}{current.code.symbol && ' · ' + current.code.symbol}</a>
+          : <p className="muted">仓库快照未确认此节点的实现。</p>)}</div>
+      <dl>{[['输入', current.input], ['操作', current.operation], ['输出', current.output]].map(([label, value]) =>
+        <div key={label}><dt>{label}</dt><dd><Markdown>{value}</Markdown></dd></div>)}</dl>
+    </div>
+  </figure>;
+}
+
+function FlowMap({ graph, active, onSelect, playing }) {
+  const arrow = useId();
+  const frame = useRef(null);
   const stages = [...new Set(graph.nodes.map(node => node.stage))].sort((a, b) => a - b);
   const lanes = stages.map(stage => graph.nodes.filter(node => node.stage === stage));
   const width = lanes.length * 178 + 16;
@@ -85,11 +89,18 @@ function FlowMap({ graph, active, onSelect }) {
     [node.id, { x: col * 178 + 16, y: (height - lane.length * 84) / 2 + row * 84 + 12 }])));
   const incoming = graph.edges.filter(edge => edge.to === active?.id);
   const outgoing = graph.edges.filter(edge => edge.from === active?.id);
+  const activeX = positions.get(active.id).x;
+  useEffect(() => {
+    const region = frame.current;
+    if (activeX < region.scrollLeft || activeX + 138 > region.scrollLeft + region.clientWidth) {
+      region.scrollLeft = activeX - 12;
+    }
+  }, [activeX]);
   return <>
-    <div className="flow-frame" tabIndex={0} role="region" aria-label="论文架构图，可横向滚动">
+    <div className="flow-frame" ref={frame} tabIndex={0} role="region" aria-label="论文架构图，可横向滚动">
       <div className="flow-canvas" style={{ width, height }}>
         <svg width={width} height={height} aria-hidden="true">
-          <defs><marker id="end-flow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+          <defs><marker id={arrow} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
             <path d="M0 0 L7 3.5 L0 7 Z" fill="context-stroke"/>
           </marker></defs>
           {graph.edges.map((edge, index) => {
@@ -106,8 +117,10 @@ function FlowMap({ graph, active, onSelect }) {
               const midpoint = (start + end) / 2;
               path = `M${start} ${a.y + 27} C${midpoint} ${a.y + 27} ${midpoint} ${b.y + 27} ${end} ${b.y + 27}`;
             }
-            return <path key={index} d={path} fill="none" stroke={live ? '#336c5f' : '#9ba9a0'} strokeWidth={live ? 2.5 : 1.4}
-              markerEnd="url(#end-flow)"><title>{edge.label}</title></path>;
+            return <g key={index}><path d={path} fill="none" stroke={live ? '#336c5f' : '#9ba9a0'} strokeWidth={live ? 2.5 : 1.4}
+              markerEnd={`url(#${arrow})`}><title>{edge.label}</title></path>
+              {playing && edge.from === active?.id && <path className="animated-flow-edge" d={path} pathLength="100" fill="none"
+                stroke="#c47b47" strokeWidth="3.5" strokeDasharray="11 89"/>}</g>;
           })}
         </svg>
         {graph.nodes.map(node => {

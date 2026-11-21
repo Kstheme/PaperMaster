@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -81,23 +81,31 @@ test('local library, four API protocols, reading, retries, exercise recovery and
       const passed = prompt.includes('"answer":"所有项共享分母"');
       return fixtureStream(url, { passed, markdown: passed ? '已解释共享分母。' : '先考虑所有项是否共享分母。' });
     }
-    if (prompt.includes('组件：graph')) {
+    if (/组件：graph(?:Detail)? ·/.test(prompt)) {
       if (Array.isArray(body.input)) {
         assert.equal(body.input[0].content[1].type, 'input_image');
         seenImage = true;
         return new Response('', { status: 415 });
       }
       const node = { why: '说明作用', input: '一个点', operation: '计算坐标', output: '变换后的点' };
-      return fixtureStream(url, { intro: '一个平面变换', focus: 'in', nodes: [
-        { ...node, id: 'in', title: '输入', stage: 0 }, { ...node, id: 'out', title: '输出', stage: 1 },
+      return fixtureStream(url, { title: prompt.includes('组件：graphDetail') ? '局部数据流' : '原创变换架构',
+        intro: '一个平面变换', focus: 'in', nodes: [
+        { ...node, id: 'in', title: '输入', stage: 0, code: { file: 'src/model.js', symbol: 'transform' } },
+        { ...node, id: 'out', title: '输出', stage: 1, code: { file: 'invented.js' } },
       ], edges: [{ from: 'in', to: 'out', label: '点' }], sources: { main: 'table-1-1', ablation: 'table-2-1' } });
     }
-    if (prompt.includes('组件：formula')) return fixtureStream(url, {
-      title: '二维拉伸', latex: 'y=2x', objective: '观察伸缩关系', explanation: '变化量翻倍', prediction: '把横坐标加倍会发生什么？',
-      module: 'in', inputs: [{ id: 'x', min: -2, max: 2, value: 1, step: .1, label: '横坐标' }],
-      steps: [{ id: 'y', expr: ['mul', 'x', 2], label: '输出' }],
-      outputs: ['y'], curve: { input: 'x', output: 'y' },
-    });
+    if (/组件：formula2? ·/.test(prompt)) {
+      const second = prompt.includes('组件：formula2');
+      return fixtureStream(url, {
+        title: second ? '平方映射' : '二维拉伸', latex: second ? 'y=x^2' : 'y=2x',
+        objective: '观察输入输出关系', explanation: '通过运算得到输出', prediction: '把横坐标加倍会发生什么？',
+        module: 'in', inputs: [{ id: 'x', min: -2, max: 2, value: 1, step: .1, label: '横坐标' }],
+        steps: [{ id: 'y', expr: second ? ['mul', 'x', 'x'] : ['mul', 'x', 2], label: '输出' }],
+        outputs: ['y'], curve: { input: 'x', output: 'y' },
+        scenarios: [{ label: '移到坐标原点', observe: '输出回到零。', values: { x: 0 } },
+          { label: '超出范围', observe: '这个场景不会被保留。', values: { x: 300 } }],
+      });
+    }
     if (prompt.includes('组件：main') || prompt.includes('组件：ablation')) {
       if (prompt.includes('组件：ablation') && failComponent) {
         failComponent = false;
@@ -110,6 +118,11 @@ test('local library, four API protocols, reading, retries, exercise recovery and
           { line: line('Method A'), method: 'Method A', dataset: '样例', values: [21, 999] },
           { line: line('Method B'), method: 'Method B', dataset: '样例', values: [42, null] },
         ] });
+    }
+    if (prompt.includes('[[FIGURE:')) {
+      const { figures } = JSON.parse(prompt.split('\n\n').at(-1));
+      return fixtureStream(url, { markdown: '### 正文\n\n阅读前导\n\n' +
+        figures.map(item => item.marker + '\n\n图后说明').join('\n\n') });
     }
     const sample = [{ title: '取值', input: '2', operation: '加 1', output: '3' }, { title: '汇总', input: '3', operation: '取值', output: '3' }];
     return fixtureStream(url, {
@@ -233,6 +246,16 @@ test('local library, four API protocols, reading, retries, exercise recovery and
     text, 'Figure 1: A geometric pipeline', 'Table 1: Main experiment results',
     'Method A 21', 'Method B 42', 'Table 2: Ablation experiment results',
   ].join('\n')));
+  const local = await openLibrary(directory);
+  const repo = { id: 'fixture-repo', url: 'https://github.com/example/geometry', commit: '1234567890abcdef' };
+  local.put('papers', { ...geometry, repos: [repo] });
+  await writeFile(local.path(geometry.id, repo.id + '.repo.json'), JSON.stringify([{ name: 'src/model.js', content: 'function transform(point) {}' }]));
+  local.close();
+  const skim = await wait((await request('skim', { papers: [{ id: geometry.id }], interactive: true })).id);
+  assert.equal(skim.repoId, repo.id);
+  assert.deepEqual(Object.keys(skim.interaction.components), ['graph']);
+  assert.deepEqual(skim.interaction.components.graph.data.nodes.map(item => item.code), [{ file: 'src/model.js', symbol: 'transform' }, undefined]);
+  assert.match(received.findLast(item => item.prompt.includes('组件：graph ·')).prompt, /function transform/);
   const original = await wait((await request('deep', { papers: [{ id: geometry.id }] })).id);
   const upgrade = await post('jobs/' + original.id + '/interactive', { sendImages: true }, 202);
   const ready = await wait(upgrade.id);
@@ -241,6 +264,10 @@ test('local library, four API protocols, reading, retries, exercise recovery and
   assert.equal(ready.status, 'completed');
   assert.ok(ready.interaction.firstReady);
   assert.equal(ready.interaction.components.formula.status, 'ready');
+  assert.equal(ready.interaction.components.formula2.status, 'ready');
+  assert.equal(ready.interaction.components.graphDetail.status, 'ready');
+  assert.equal(ready.interaction.components.graphDetail.data.nodes[0].code?.file, 'src/model.js');
+  assert.equal(ready.interaction.components.formula2.data.scenarios.length, 1);
   assert.equal(ready.interaction.components.main.status, 'ready');
   assert.deepEqual(ready.interaction.components.main.data.rows[0].values, [21, null]);
   assert.equal(ready.interaction.components.main.data.omitted, 1);
@@ -254,9 +281,14 @@ test('local library, four API protocols, reading, retries, exercise recovery and
   assert.equal(retried.interaction.components.ablation.status, 'ready');
   assert.equal(received.length, requestsBeforeRetry + 1);
   assert.deepEqual(retried.sections, ready.sections);
-  assert.match((await call('jobs/' + ready.id + '/note')).markdown, /教学演示[\s\S]+论文报告结果/);
+  const illustratedNote = (await call('jobs/' + ready.id + '/note')).markdown;
+  assert.match(illustratedNote, /阅读前导[\s\S]+原创变换架构[\s\S]+图后说明/);
+  assert.match(illustratedNote, /二维拉伸[\s\S]+平方映射[\s\S]+论文报告结果/);
+  assert.doesNotMatch(illustratedNote, /\[\[FIGURE:/);
   const observed = await post('jobs/' + ready.id + '/observation', { values: { x: 1.5 }, observation: '输出翻倍' });
   assert.match(observed.markdown, /输入：横坐标 = 1\.5[\s\S]+输出：输出 = 3[\s\S]+观察：输出翻倍/);
+  assert.match((await post('jobs/' + ready.id + '/observation', { component: 'formula2', values: { x: 1.5 } })).markdown,
+    /教学演示 · 平方映射[\s\S]+输出 = 2\.25/);
   const guidedInteractive = await wait((await request('guided', { papers: [{ id: geometry.id }], interactive: true })).id);
   assert.equal(guidedInteractive.interaction.sendImages, false);
   assert.equal(guidedInteractive.interaction.components.formula.status, 'ready');

@@ -8,23 +8,26 @@ const number = value => Array.isArray(value) ? '[' + value.map(number).join(', '
 const initial = demo => Object.fromEntries(demo.inputs.map(item => [item.id, item.value]));
 const palette = ['#336c5f', '#a65c39', '#4d6293', '#87661b', '#33757b', '#8a5365'];
 
-export function FormulaLab({ demo, jobId, onNote }) {
+export function FormulaLab({ demo, jobId, component, onNote }) {
   const [values, setValues] = useState(() => initial(demo));
   const [observe, setObserve] = useState(false);
   const [observation, setObservation] = useState('');
   const [save, setSave] = useState({});
+  const [scenario, setScenario] = useState(null);
   let result, problem;
   try { result = solveDemo(demo, values); }
   catch (error) { problem = error.message; }
   const intermediate = demo.steps.filter(item => item.label && !demo.outputs.includes(item.id));
+  const scenarios = demo.scenarios || [];
   function setInput(id, value) {
+    setScenario(null);
     setValues(current => ({ ...current, [id]: value }));
   }
   async function submit(event) {
     event.preventDefault();
     setSave({ busy: true });
     try {
-      await api(`jobs/${jobId}/observation`, { method: 'POST', json: { values, observation: observation.trim() } });
+      await api(`jobs/${jobId}/observation`, { method: 'POST', json: { component, values, observation: observation.trim() } });
       setObservation('');
       setObserve(false);
       setSave({ message: '已加入主笔记' });
@@ -33,13 +36,20 @@ export function FormulaLab({ demo, jobId, onNote }) {
   }
   return <section className="formula-lab" aria-label="公式演算">
     <div className="interaction-heading"><div><p className="eyebrow">教学演示</p><h3>{demo.title}</h3></div>
-      <button onClick={() => { setValues(initial(demo)); setSave({}); }}><RotateCcw size={15}/>恢复初始值</button></div>
+      <button onClick={() => { setValues(initial(demo)); setSave({}); setScenario(null); }}><RotateCcw size={15}/>恢复初始值</button></div>
     <Markdown>{demo.objective}</Markdown>
-    <Markdown>{'$$\n' + demo.latex + '\n$$'}</Markdown>
     <p className="prediction">{demo.prediction}</p>
+    {scenarios.length > 0 && <div className="lab-scenarios">
+      <div className="actions" aria-label="可试算的情景">{scenarios.map((item, index) => <button key={index} type="button"
+        aria-pressed={scenario === index} onClick={() => { setScenario(index); setValues({ ...initial(demo), ...item.values }); }}>
+        {item.label}</button>)}</div>
+      {scenario !== null && <p role="status">{scenarios[scenario].observe}</p>}
+    </div>}
     <div className="lab-stage">
       <div className="lab-visual">
-        {demo.marks.length > 0 && <Geometry demo={demo} result={result} onDrag={delta => setValues(current => ({ ...current, ...delta }))}/>}
+        {demo.marks.length > 0 && <Geometry demo={demo} result={result} onDrag={delta => {
+          setScenario(null); setValues(current => ({ ...current, ...delta }));
+        }}/>}
         {result && <MiniCharts demo={demo} values={values} result={result}/>}
         {problem && <p role="status" className="error">{problem}</p>}
       </div>
@@ -55,6 +65,10 @@ export function FormulaLab({ demo, jobId, onNote }) {
     {result && <dl className="lab-results" aria-label="计算结果">{demo.outputs.map(id => <div key={id}>
       <dt>{demo.steps.find(item => item.id === id)?.label || id}</dt><dd><output>{number(result[id])}</output></dd>
     </div>)}</dl>}
+    <details><summary>公式与符号</summary>
+      <Markdown>{'$$\n' + demo.latex.replace(/^\$+|\$+$/g, '') + '\n$$'}</Markdown>
+      <dl className="lab-results">{demo.inputs.map(item => <div key={item.id}><dt>{item.label}</dt><dd>{item.id}</dd></div>)}</dl>
+    </details>
     {result && intermediate.length > 0 && <details><summary>查看中间计算结果</summary>
       <dl className="lab-results">{intermediate.map(item => <div key={item.id}><dt>{item.label}</dt><dd>{number(result[item.id])}</dd></div>)}</dl>
     </details>}

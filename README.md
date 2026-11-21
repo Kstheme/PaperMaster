@@ -2,7 +2,7 @@
 
 **Read research papers by exploring their methods, testing their equations, and comparing their results.**
 
-[简体中文](README.zh-CN.md) · [Install](#install) · [Quick start](#quick-start) · [npm](https://www.npmjs.com/package/papermaster-reader)
+[简体中文](README.zh-CN.md) · [Install](#install) · [Quick start](#quick-start) · [Demos](#demos) · [npm](https://www.npmjs.com/package/papermaster-reader)
 
 PaperMaster is a local reading workspace for research papers. Import a PDF or an arXiv link, then follow a method from its architecture diagram to an interactive equation and the experiments that test it. Save your findings as Markdown.
 
@@ -21,17 +21,27 @@ PaperMaster opens your browser and prints its local URL. In Windows PowerShell, 
 
 1. Open **模型连接** (Model connections) and add a provider. For a **Codex subscription**, install the Codex CLI and run `codex login` with your ChatGPT account. You can select a model from the CLI's list.
 2. Click **导入论文** (Import paper), then upload a text-based PDF or paste an arXiv URL.
-3. Choose **完整精读** (Deep reading). Select a node to trace its inputs and outputs, change values in the formula lab, then open **实验对照** (Experiment comparison) to compare results under the reported conditions.
-4. Save an observation to the main note or export the reading as Markdown. On a previous text-only reading, **生成交互版** creates a new interactive record from the same paper version.
+3. Choose **完整精读** (Deep reading). Follow the interactive diagrams in the text, try the formula scenarios, and compare results in the experiment chapter. **泛读** (Skim) includes an animated overview. Select a repository snapshot to ground the diagrams in the available code.
+4. Save an observation to the main note or export the reading as Markdown. On an older reading, **生成交互版** creates a new interactive record from the same paper version.
 
-![PaperMaster showing the Transformer architecture and an interactive attention demonstration](docs/images/interactive-reading.png)
+## Demos
+
+Both recordings use reading results for [Visual Scaffolding: Toward Native Multimodal Reasoning](https://arxiv.org/abs/2610.25247v1).
+
+**Skim the architecture.** Play the flow inside the article and watch the diagram and the selected module explanation advance together.
+
+![The Visual Scaffolding architecture playing step by step in a PaperMaster skim](docs/images/visual-scaffolding-skim.gif)
+
+**Try a formula in context.** Switch between scenarios and see which grid cells are selected when their scores cross the threshold.
+
+![The Visual Scaffolding formula lab changing its selection as scenarios change](docs/images/visual-scaffolding-formula.gif)
 
 ## What you can do
 
 | Feature | Workflow |
 | --- | --- |
-| Architecture explorer | Select a module and follow data through connected stages. |
-| Formula lab | Drag points or vectors, edit inputs, and see intermediate values and outputs update in real time. |
+| Architecture explorer | Play or step through a method inline. Select a module to inspect its input, operation, and output. |
+| Formula lab | Try preset scenarios or edit inputs. Deep reading can include separate labs for different steps of the method. |
 | Experiment comparison | Filter reported results and ablations, compare rows, and open the original figures or tables. |
 | Guided reading | Work through questions with feedback and resume where you left off. |
 | Repository reading | Connect a public GitHub repository and read the implementation at a recorded commit. Requires Git. |
