@@ -3,19 +3,23 @@ import { BookOpen, Pause, Play, RotateCcw } from 'lucide-react';
 import { api } from './api.js';
 import { FormulaLab } from './formula-lab.jsx';
 import { Markdown } from './markdown.jsx';
+import { EvidenceLinks } from './workbench-fields.jsx';
+import { RepositoryWorkbench } from './repository-workbench.jsx';
 import { components as names } from '../server/reading-figures.js';
 
 const working = job => ['queued', 'running'].includes(job.status);
 
-export function ReadingFigure({ name, job, repo, onRetry, busy, onNote }) {
+export function ReadingFigure({ name, job, repo, onRetry, busy, onNote, onTool }) {
   const record = job.interaction.components[name];
   const data = record?.data;
   return <div className="chapter-figure">
     {!data ? <ComponentState name={name} record={record} job={job} onRetry={onRetry} canRetry={!busy && !working(job)}/>
-      : name.startsWith('graph') ? <AnimatedGraph graph={data} name={names[name]} repo={repo}/>
+      : name.startsWith('graph') ? <AnimatedGraph graph={data} name={names[name]} repo={repo} onTool={onTool}/>
         : name.startsWith('formula') ? <FormulaLab demo={data} jobId={job.id} component={name} onNote={onNote}/>
           : <ExperimentTable table={data} name={names[name]}/>}
     {record?.source && <SourcePreview source={record.source} jobId={job.id}/>}
+    {data && onTool && !name.startsWith('graph') && <button className="figure-question"
+      onClick={() => onTool([data.title, data.latex, data.claim, record.source?.caption].filter(Boolean).join('\n'), { component: name })}>就此图表或公式追问</button>}
   </div>;
 }
 
@@ -24,6 +28,20 @@ export function ReadingSources({ job }) {
     <summary>原论文图表目录</summary>
     {job.interaction.sources.map(source => <SourcePreview key={source.id} source={source} jobId={job.id}/>)}
   </details>;
+}
+
+export function RepositoryReading({ block, repo, onTool, initialStep }) {
+  const guide = block.walkthrough ?? block.graph;
+  return <section className="repo-reading-block" aria-label={block.title}>
+    {guide?.nodes.length ? <RepositoryWorkbench guide={guide} repo={repo} onTool={onTool} initialStep={initialStep}/>
+      : <h3>{block.title}</h3>}
+    <details open={!guide?.nodes.length} className="repo-reading-evidence">
+      <summary>实现说明与依据</summary>
+      <Markdown>{block.markdown}</Markdown>
+      {block.evidence.length ? <EvidenceLinks items={block.evidence}/> : <p className="muted">当前材料没有可定位的实现证据。</p>}
+      <details><summary>查阅了哪些文件</summary><ul>{block.searched.map(file => <li key={file}><code>{file}</code></li>)}</ul></details>
+    </details>
+  </section>;
 }
 
 function ComponentState({ name, record, job, onRetry, canRetry }) {
@@ -36,7 +54,7 @@ function ComponentState({ name, record, job, onRetry, canRetry }) {
   </div>;
 }
 
-function AnimatedGraph({ graph, name, repo }) {
+function AnimatedGraph({ graph, name, repo, onTool, repository = false }) {
   const order = [...graph.nodes].sort((a, b) => a.stage - b.stage);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -55,7 +73,7 @@ function AnimatedGraph({ graph, name, repo }) {
     setIndex(order.findIndex(item => item.id === node));
   }
   return <figure className="inline-flow">
-    <figcaption><h3>{graph.title || name}</h3><Markdown>{graph.intro}</Markdown></figcaption>
+    <figcaption><h3>{graph.title || name}</h3>{graph.intro && <Markdown>{graph.intro}</Markdown>}</figcaption>
     <div className="actions flow-controls">
       <button type="button" onClick={() => {
         if (!playing && last) setIndex(0);
@@ -65,20 +83,26 @@ function AnimatedGraph({ graph, name, repo }) {
       <button type="button" disabled={last} onClick={() => select(order[index + 1].id)}>下一步</button>
       <span className="muted" aria-live={playing ? 'off' : 'polite'}>{index + 1} / {order.length} · {current.title}</span>
     </div>
-    <FlowMap graph={graph} active={current} onSelect={select} playing={playing}/>
+    <FlowMap graph={graph} active={current} onSelect={select} playing={playing} repository={repository}/>
     <div className="module-detail">
       <div><h4>{current.title}</h4><Markdown>{current.why}</Markdown>
-        {repo && (current.code ? <a className="module-source" href={repo.url + '/blob/' + repo.commit + '/' +
-          current.code.file.split('/').map(encodeURIComponent).join('/')} target="_blank" rel="noreferrer">
+        {current.evidence?.length ? <EvidenceLinks items={current.evidence}/> : repo && (current.code ? <a className="module-source" href={repo.url + '/blob/' + repo.commit + '/' +
+          current.code.file.split('/').map(encodeURIComponent).join('/') + (current.code.line ? '#L' + current.code.line : '')} target="_blank" rel="noreferrer">
           {current.code.file}{current.code.symbol && ' · ' + current.code.symbol}</a>
-          : <p className="muted">仓库快照未确认此节点的实现。</p>)}</div>
+          : <p className="muted">仓库快照未确认此节点的实现。</p>)}
+        {current.snippet && <details key={current.id}><summary>查看这一段源码</summary><pre className="file-code">{current.snippet}</pre></details>}
+        {onTool && <div className="actions">
+          <button onClick={() => onTool([current.title, current.operation].join('\n'),
+            { repoId: repo?.id, file: current.evidence?.[0]?.file || current.code?.file })}>追问此步骤</button>
+        </div>}
+      </div>
       <dl>{[['输入', current.input], ['操作', current.operation], ['输出', current.output]].map(([label, value]) =>
         <div key={label}><dt>{label}</dt><dd><Markdown>{value}</Markdown></dd></div>)}</dl>
     </div>
   </figure>;
 }
 
-function FlowMap({ graph, active, onSelect, playing }) {
+function FlowMap({ graph, active, onSelect, playing, repository }) {
   const arrow = useId();
   const frame = useRef(null);
   const stages = [...new Set(graph.nodes.map(node => node.stage))].sort((a, b) => a - b);
@@ -97,7 +121,7 @@ function FlowMap({ graph, active, onSelect, playing }) {
     }
   }, [activeX]);
   return <>
-    <div className="flow-frame" ref={frame} tabIndex={0} role="region" aria-label="论文架构图，可横向滚动">
+    <div className="flow-frame" ref={frame} tabIndex={0} role="region" aria-label={repository ? '仓库流程图，可横向滚动' : '论文架构图，可横向滚动'}>
       <div className="flow-canvas" style={{ width, height }}>
         <svg width={width} height={height} aria-hidden="true">
           <defs><marker id={arrow} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
@@ -117,10 +141,10 @@ function FlowMap({ graph, active, onSelect, playing }) {
               const midpoint = (start + end) / 2;
               path = `M${start} ${a.y + 27} C${midpoint} ${a.y + 27} ${midpoint} ${b.y + 27} ${end} ${b.y + 27}`;
             }
-            return <g key={index}><path d={path} fill="none" stroke={live ? '#336c5f' : '#9ba9a0'} strokeWidth={live ? 2.5 : 1.4}
+            return <g key={index}><path d={path} fill="none" stroke={live ? 'var(--accent)' : 'var(--line-strong)'} strokeWidth={live ? 2.5 : 1.4}
               markerEnd={`url(#${arrow})`}><title>{edge.label}</title></path>
               {playing && edge.from === active?.id && <path className="animated-flow-edge" d={path} pathLength="100" fill="none"
-                stroke="#c47b47" strokeWidth="3.5" strokeDasharray="11 89"/>}</g>;
+                stroke="var(--signal)" strokeWidth="3.5" strokeDasharray="11 89"/>}</g>;
           })}
         </svg>
         {graph.nodes.map(node => {
@@ -131,7 +155,7 @@ function FlowMap({ graph, active, onSelect, playing }) {
       </div>
     </div>
     <div className="flow-neighbors" aria-label="切换到相邻模块">
-      {[[incoming, '上游', 'from'], [outgoing, '下游', 'to']].map(([edges, label, field]) => edges.length > 0 &&
+      {[[incoming, repository ? '前一步' : '上游', 'from'], [outgoing, repository ? '后一步' : '下游', 'to']].map(([edges, label, field]) => edges.length > 0 &&
         <div className="actions" key={label}><span>{label}</span>{edges.map((edge, index) => <button key={index}
           onClick={() => onSelect(edge[field])}>{graph.nodes.find(node => node.id === edge[field]).title}
           {edge.label && <small>{edge.label}</small>}</button>)}</div>)}

@@ -1,7 +1,7 @@
 {
   "name": "papermaster-reader",
-  "version": "0.3.0",
-  "description": "A local workspace for reading papers with interactive diagrams, formulas, and experiments",
+  "version": "0.4.0",
+  "description": "A local research reading workspace for connecting papers, source code, experiments, and notes",
   "homepage": "https://github.com/Kstheme/PaperMaster#readme",
   "repository": {
     "type": "git",
@@ -29,6 +29,8 @@
     "server",
     "dist",
     "README.zh-CN.md",
+    "docs/auto-research-export.md",
+    "docs/images/repository-workbench.webp",
     "docs/images/visual-scaffolding-skim.gif",
     "docs/images/visual-scaffolding-formula.gif"
   ],

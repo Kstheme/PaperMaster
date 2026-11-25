@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -48,6 +49,269 @@ function fixtureStream(url, data) {
     headers: { 'content-type': 'text/event-stream' },
   });
 }
+
+test('confirmed reading decisions flow from a pinned source to a matching immutable export', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-method-test-'));
+  let app;
+  t.after(async () => { await app?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  let attempt = 0;
+  let repositoryGenerations = 0;
+  const efforts = [];
+  const quote = 'The candidate routine evaluates bounded inputs';
+  const codex = {
+    models: async () => [
+      { id: 'full', label: 'Full', efforts: ['low', 'high'], defaultEffort: 'low', isDefault: true },
+      { id: 'small', label: 'Small', efforts: ['low'], defaultEffort: 'low' },
+    ],
+    async generate({ model, prompt, effort }) {
+      efforts.push({ model, effort });
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      let output = { markdown: '阅读段落：候选流程' };
+      if (prompt.startsWith('任务：PaperMaster 阅读追问')) {
+        if (content.question === '第二问') assert.equal(content.history[0].question, '第一问');
+        if (content.question === '候选步骤怎样实现？') {
+          assert.equal(content.readingStep.title, '调用候选生成');
+          assert.match(content.code.find(file => file.name === 'src/infer.py').lines[2], /return generate/);
+        }
+        output = { answer: '解释：使用有界输入。\n\n第二段：不要加入笔记。',
+          evidence: [{ kind: 'paper', page: 1, quote }, { kind: 'paper', page: 2, quote }] };
+      } else if (prompt.startsWith('任务：PaperMaster 仓库精读')) {
+        assert.equal(content.commit, 'a'.repeat(40));
+        output = { paths: [{ kind: 'inference', sample: '点 P', steps: [
+          { file: 'src/infer.py', line: 1, symbol: 'infer', callLine: 2, operation: '调用 generate' },
+          { file: 'src/infer.py', line: 4, symbol: 'generate', output: '候选集合' },
+          { file: 'src/infer.py', line: 99, symbol: 'invented' },
+        ] }, { kind: 'training', steps: [{ file: 'README.md', line: 1, symbol: 'train' }] }], clues: 'README 提到训练' };
+      } else if (prompt.startsWith('任务：PaperMaster 主题方法表提炼')) {
+        const saved = Object.keys(content.savedCode)[0];
+        output = { rows: [{
+          relevance: { kind: 'direct', reason: '用几何候选生成限定几何推理的搜索范围', evidence: [{ kind: 'paper', page: 1, quote }] },
+          fields: {
+            name: { text: '有界候选生成', state: 'known' },
+            problem: { text: '如何找出候选', state: 'known' },
+            pipeline: { text: '点 → 生成 → 候选', state: 'known', evidence: saved ?
+              [{ kind: 'saved', id: saved }] : [{ kind: 'paper', page: 1, quote }] },
+            conditions: { text: '模型提议条件', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+          },
+          idea: '迁移到新任务',
+        }, { relevance: { kind: 'background', reason: '通用训练背景' },
+          fields: { name: { text: '通用日志格式', state: 'known' } } },
+        { relevance: { kind: 'direct', reason: '关于训练运行', evidence: [{ kind: 'paper', page: 1, quote }] },
+          fields: { name: { text: '通用设备管理', state: 'known' } } }] };
+      } else if (prompt.startsWith('任务：PaperMaster 主题相关性复核')) {
+        output = { decisions: content.items.map(item => ({ id: item.id, direct: item.name === '有界候选生成' &&
+          content.topic.scope !== '只看蛋白质结构预测' })) };
+      } else if (prompt.startsWith('任务：PaperMaster 仓库工程精读')) {
+        repositoryGenerations += 1;
+        assert.equal(content.repository.commit, 'a'.repeat(40));
+        assert.ok(content.repository.files.some(file => file.name === 'src/infer.py'));
+        output = { sample: '教学样本：点 P', sections: Object.fromEntries(['repoArchitecture', 'repoData', 'repoEngineering'].map(key => [key, {
+          markdown: '从仓库源码核查工程实现', reuse: '保留输入点与生成的候选', evidence: [{ kind: 'code', file: 'src/infer.py', from: 2, quote: 'return generate(x)' }],
+          steps: [{ title: '调用候选生成', why: '接入核心实现', input: '点', operation: '调用 generate', output: '候选',
+            concept: '有界候选过程', mapping: '输入点由 infer 传给 generate',
+            quiz: { question: '输出什么？', alternatives: ['原始句子', '空值'], explanation: 'generate 返回候选' },
+            evidence: [{ kind: 'paper', page: 1, quote }, { kind: 'code', file: 'src/infer.py', from: 2, quote: 'return generate(x)' }] },
+          { title: '虚构步骤', operation: '未知过程', evidence: [{ kind: 'code', file: 'src/infer.py', from: 99, quote: 'missing()' }] }],
+        }])) };
+      } else if (/组件：graph(?:Detail)? ·/.test(prompt)) {
+        const node = { why: '说明作用', input: '一个点', operation: '生成候选', output: '候选集合' };
+        output = { title: '论文架构', intro: '论文方法', focus: 'in', nodes: [
+          { ...node, id: 'in', title: '输入', stage: 0, code: { file: 'src/infer.py', symbol: 'infer' } },
+          { ...node, id: 'out', title: '输出', stage: 1 },
+        ], edges: [{ from: 'in', to: 'out', label: '候选' }] };
+      } else if (/组件：formula2? ·/.test(prompt)) {
+        const multiplier = prompt.includes('组件：formula2') ? 3 : 2;
+        output = { title: '公式演算', latex: 'y=' + multiplier + 'x', objective: '理解输入输出', explanation: '按比例计算',
+          prediction: '将输入翻倍', module: 'in', inputs: [{ id: 'x', label: '横坐标', min: -2, max: 2, value: 1, step: 0.1 }],
+          steps: [{ id: 'y', label: '输出', expr: ['mul', 'x', multiplier] }], outputs: ['y'], curve: { input: 'x', output: 'y' } };
+      } else if (/组件：(main|ablation) ·/.test(prompt)) {
+        const labels = prompt.includes('组件：ablation') ? ['Full setup', 'Without filter'] : ['Method A', 'Method B'];
+        output = { title: '实验对照', claim: '解释实验趋势', limitation: '仅限给定样本',
+          columns: [{ id: 'score', label: '分数' }], rows: labels.map((method, index) => ({
+            line: Number(content.layout.split('\n').find(line => line.includes(method)).split(':')[0]),
+            method, dataset: '样例', values: [index ? 42 : 21],
+          })) };
+      } else if (prompt.includes('当前阅读方式：关联仓库精读')) {
+        assert.ok(content.implementation?.length, '论文正文生成前要有工程证据');
+        output = { markdown: ['论文步骤如何落到仓库实现。', ...(content.figures || []).map(item => item.marker)].join('\n\n') };
+      } else if (prompt.includes('当前小节：机制、公式与样本') || prompt.includes('当前小节：方法与关键公式')) {
+        if (!attempt++) {
+          const error = new Error('fixture interruption');
+          error.code = 'fixture_failure';
+          throw error;
+        }
+      }
+      return { text: JSON.stringify(output), model, ...(!effort && { effectiveEffort: 'low' }) };
+    },
+  };
+  async function start() {
+    app = await createApp({ directory, codex });
+    return (await (await fetch(app.url + '/api/session')).json()).token;
+  }
+  let token = await start();
+  async function call(path, input, status = 200, method = input === undefined ? 'GET' : 'POST') {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(input !== undefined && { 'content-type': 'application/json' }) },
+      ...(input !== undefined && { body: JSON.stringify(input) }) });
+    const result = response.headers.get('content-type').includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+  async function poll(id) {
+    for (let index = 0; index < 80; index += 1) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(25);
+    }
+    throw new Error('Job did not finish');
+  }
+  const uploaded = await fetch(app.url + '/api/papers?name=v1.pdf', { method: 'POST',
+    headers: { 'X-PaperMaster-Session': token, 'content-type': 'application/pdf' },
+    body: pdf('Candidates', [quote + ' for an example geometry method.',
+      'The paper specifies required parameters and explains how to generate the candidate set.',
+      'Table 1: Main experiment results', 'Method A 21', 'Method B 42',
+      'Table 2: Ablation experiment results', 'Full setup 21', 'Without filter 42',
+    ].join('\n')) });
+  assert.equal(uploaded.status, 201);
+  const paper = await uploaded.json();
+  const version1 = paper.versions[0];
+  const version2 = { ...version1, id: randomUUID(), name: 'v2.pdf' };
+  const repo = { id: randomUUID(), url: 'https://github.com/example/paper', commit: 'a'.repeat(40), files: ['README.md', 'src/infer.py'],
+    inventoryVersion: 2, sourceIndex: [] };
+  const library = await openLibrary(directory);
+  try {
+    library.put('papers', { ...paper, versionId: version2.id, versions: [version1, version2], repos: [repo] });
+    await writeFile(library.path(paper.id, version2.id + '.json'), JSON.stringify([quote + ' in the revised version.']));
+    await writeFile(library.path(paper.id, repo.id + '.repo.json'), JSON.stringify([
+      { name: 'README.md', content: 'def train(): example' },
+      { name: 'src/infer.py', content: 'def infer(x):\n    return generate(x)\n\ndef generate(x):\n    return [x]' },
+    ]));
+  } finally { library.close(); }
+
+  const full = await call('connections', { provider: 'codex', model: 'full', effort: 'high' }, 201);
+  const small = await call('connections', { provider: 'codex', model: 'small' }, 201);
+  const refs = [{ id: paper.id, versionId: version1.id }];
+  const created = await call('jobs', { mode: 'deep', papers: refs, connectionId: full.id, repoId: repo.id }, 202);
+  const interrupted = await poll(created.id);
+  assert.equal(interrupted.status, 'failed');
+  assert.equal(interrupted.sections[0].effort, 'high');
+  const jobPath = 'jobs/' + created.id;
+  const blocked = await call(jobPath + '/resume', { connectionId: small.id }, 422);
+  assert.equal(blocked.code, 'unsupported_effort');
+  await call(jobPath + '/resume', { connectionId: small.id, effort: 'default' }, 202);
+  const completed = await poll(created.id);
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.sections[0].effort, 'high');
+  assert.equal(completed.sections[1].effort, 'default');
+  assert.equal(completed.sections[1].effectiveEffort, 'low');
+  assert.ok(efforts.some(item => item.model === 'full' && item.effort === 'high'));
+
+  const threadId = randomUUID();
+  const first = await call(jobPath + '/followups', { threadId, turnId: randomUUID(), question: '第一问',
+    connectionId: full.id, effort: 'low', position: { section: 'overview', text: '候选流程' } });
+  assert.equal(first.turns[0].effort, 'low');
+  assert.equal(first.turns[0].evidence.length, 1);
+  assert.equal(first.turns[0].evidence[0].versionId, version1.id);
+  await call(jobPath + '/followups', { threadId, turnId: randomUUID(), question: '第二问', connectionId: full.id });
+  const save = { turnId: first.turns[0].id, text: '解释：使用有界输入。', observation: '迁移到新任务', kind: 'idea', saveId: randomUUID() };
+  const note = await call(jobPath + '/followup-note/' + threadId, save);
+  assert.match(note.markdown, /提问位置 · 论文速览/);
+  assert.match(note.markdown, /迁移到新任务/);
+  assert.doesNotMatch(note.markdown, /不要加入笔记/);
+  assert.equal((await call(jobPath + '/followup-note/' + threadId, save)).revision, note.revision);
+
+  const trace = await call(jobPath + '/repo-trace', { focus: '候选生成', connectionId: full.id, repoId: repo.id });
+  assert.equal(trace.paths.length, 1);
+  assert.deepEqual(trace.paths[0].steps.map(step => step.symbol), ['infer', 'generate']);
+  assert.equal(trace.paths[0].partial, true);
+  assert.match(trace.paths[0].steps[0].call.url, /#L2$/);
+  await call(jobPath + '/repo-note/' + trace.id, { pathIndex: 0, stepIndex: 0 });
+
+  const table = await call('method-tables', { title: '几何推理' }, 201);
+  const root = 'method-tables/' + table.id;
+  const preview = papers => call(root + '/candidates', { connectionId: full.id, papers });
+  let draft = await preview(refs);
+  assert.deepEqual(draft.rows.map(candidate => candidate.fields.name.text), ['有界候选生成'], '通用背景方法不能进入主题候选');
+  const firstCandidate = draft.rows[0];
+  assert.equal(firstCandidate.fields.pipeline.evidence[0].kind, 'code');
+  assert.equal(firstCandidate.idea, '迁移到新任务');
+  const one = await call(root + '/apply', { token: draft.token, items: [{ id: firstCandidate.id }] });
+  const row = one.rows[0];
+  const edited = await call(root + '/rows/' + row.id, { revision: one.revision,
+    fields: { conditions: { text: '手工确认条件', state: 'known' } } }, 200, 'PATCH');
+  const snapshotId = randomUUID();
+  const delivery = { revision: edited.revision, items: [{ id: row.id, includeIdea: false }] };
+  const preflight = await call(root + '/delivery-preview', delivery);
+  assert.equal(preflight.rows[0].idea, undefined);
+  const confirmed = await call(root + '/deliveries', { ...delivery, snapshotId, confirmed: true }, 201);
+  assert.equal(confirmed.rows.length, 1);
+  assert.equal(confirmed.rows[0].idea, undefined);
+
+  draft = await preview([...refs, { id: paper.id, versionId: version2.id }]);
+  const [v1, v2] = draft.rows;
+  assert.equal(v1.matchId, row.id);
+  assert.equal(v2.relatedId, row.id);
+  assert.equal(v2.idea, '');
+  const after = await call(root + '/apply', { token: draft.token, items: [
+    { id: v1.id, targetId: row.id, fields: { pipeline: 'adopt' } }, { id: v2.id, relatedId: row.id, carry: ['conditions'] },
+  ] });
+  assert.equal(after.rows.length, 2);
+  assert.equal(after.rows[0].fields.conditions.text, '手工确认条件');
+  assert.equal(after.rows[1].fields.conditions.state, 'pending');
+  assert.deepEqual(after.rows[1].fields.conditions.evidence, []);
+  await call(root + '/rows/' + row.id, { revision: after.revision,
+    fields: { conditions: { text: '编辑后的条件', state: 'known' } } }, 200, 'PATCH');
+
+  await app.close();
+  app = undefined;
+  token = await start();
+  const stored = await call(jobPath + '/followups');
+  assert.equal(stored[0].turns.length, 2);
+  await call(jobPath + '/followups/' + threadId, undefined, 200, 'DELETE');
+  assert.deepEqual(await call(jobPath + '/followups'), []);
+  assert.match((await call('papers/' + paper.id + '/note')).markdown, /解释：使用有界输入/);
+  const repoReading = await call('jobs', { mode: 'repo', papers: refs, connectionId: full.id, repoId: repo.id }, 202);
+  const combined = await poll(repoReading.id);
+  assert.equal(combined.status, 'completed');
+  assert.ok(combined.sections.some(section => section.key === 'mechanism'));
+  for (const [chapter, figure] of [['overview', 'repoArchitecture'], ['mechanism', 'repoData'], ['evidence', 'repoEngineering']]) {
+    const section = combined.sections.find(item => item.key === chapter);
+    assert.equal(section.repository.key, figure);
+    assert.equal(section.repository.evidence[0].commit, repo.commit);
+    assert.deepEqual(section.repository.graph.nodes.map(node => node.title), ['调用候选生成']);
+    assert.equal(section.repository.graph.sample, '教学样本：点 P');
+    assert.equal(section.repository.graph.nodes[0].concept, '有界候选过程');
+    assert.match(section.repository.graph.nodes[0].snippet, /return generate/);
+    assert.equal(section.repository.graph.nodes[0].quiz.question, '输出什么？');
+    assert.match(section.markdown, new RegExp('FIGURE:' + figure));
+  }
+  assert.equal(combined.sections.length, 6);
+  assert.deepEqual(Object.keys(combined.interaction.components), ['graph', 'graphDetail', 'formula', 'formula2', 'main', 'ablation']);
+  assert.equal(combined.interaction.components.graph.data.nodes[0].code.line, 1);
+  for (const key of ['formula', 'formula2', 'main', 'ablation']) {
+    assert.equal(combined.interaction.components[key].status, 'ready', combined.interaction.components[key].error);
+  }
+  assert.equal(repositoryGenerations, 1, '各章复用同一批仓库材料');
+  const repoNote = await call('jobs/' + repoReading.id + '/note');
+  assert.match(repoNote.markdown, /本章证据/);
+  assert.match(repoNote.markdown, /可复用做法 · 保留输入点与生成的候选/);
+  const stepThread = await call('jobs/' + repoReading.id + '/followups', {
+    threadId: randomUUID(), turnId: randomUUID(), question: '候选步骤怎样实现？',
+    position: { section: 'mechanism', repositoryStep: 'step0', text: '调用候选生成' },
+  });
+  assert.equal(stepThread.origin.repositoryStep, 'step0');
+  assert.equal(stepThread.origin.repoId, repo.id);
+  assert.equal(stepThread.origin.page, 1);
+  const unrelated = await call(root + '/candidates', { connectionId: full.id, papers: refs, topicScope: '只看蛋白质结构预测' });
+  assert.deepEqual(unrelated.rows, []);
+  const jsonExport = await call(root + '/download/' + snapshotId);
+  const markdown = await call(root + '/download/' + snapshotId + '?format=markdown');
+  assert.deepEqual(jsonExport, confirmed);
+  assert.match(markdown, /手工确认条件/);
+  assert.match(markdown, /src\/infer\.py/);
+  assert.match(markdown, new RegExp(snapshotId));
+  assert.doesNotMatch(markdown, /编辑后的条件|迁移到新任务/);
+});
 
 test('local library, four API protocols, reading, retries, exercise recovery and backup', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'papermaster-test-'));
@@ -254,7 +518,7 @@ test('local library, four API protocols, reading, retries, exercise recovery and
   const skim = await wait((await request('skim', { papers: [{ id: geometry.id }], interactive: true })).id);
   assert.equal(skim.repoId, repo.id);
   assert.deepEqual(Object.keys(skim.interaction.components), ['graph']);
-  assert.deepEqual(skim.interaction.components.graph.data.nodes.map(item => item.code), [{ file: 'src/model.js', symbol: 'transform' }, undefined]);
+  assert.deepEqual(skim.interaction.components.graph.data.nodes.map(item => item.code), [{ file: 'src/model.js', symbol: 'transform', line: 1 }, undefined]);
   assert.match(received.findLast(item => item.prompt.includes('组件：graph ·')).prompt, /function transform/);
   const original = await wait((await request('deep', { papers: [{ id: geometry.id }] })).id);
   const upgrade = await post('jobs/' + original.id + '/interactive', { sendImages: true }, 202);

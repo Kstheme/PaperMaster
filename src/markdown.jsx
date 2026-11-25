@@ -14,7 +14,7 @@ export function Markdown({ children, chapter = false }) {
       ...headings,
       table: ({ node, ...props }) => <div className="markdown-table" tabIndex={0} role="region" aria-label="数据表"><table {...props}/></div>,
       img: ({ alt }) => <span>{alt || '图像'}</span>,
-      a: ({ href, children: label }) => /^https?:\/\//i.test(href ?? '')
+      a: ({ href, children: label }) => /^(?:https?:\/\/|\/\?paper=[\da-f-]{36}&(?:job|pdf)=)/i.test(href ?? '')
         ? <a href={href} target="_blank" rel="noopener noreferrer">{label}</a> : <span>{label}</span>,
     }}>{normalizeMarkdown(children)}</ReactMarkdown></div>;
 }

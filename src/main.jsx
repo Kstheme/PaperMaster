@@ -1,21 +1,27 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Tabs from '@radix-ui/react-tabs';
-import { ArrowDownToLine, ArrowUpRight, BookOpen, Braces, ChevronRight, FileText, KeyRound, Layers3, Plus, Sparkles } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpRight, BookOpen, Braces, ChevronRight, FileText, KeyRound, Layers3, Plus, Search, Sparkles } from 'lucide-react';
 import { api, download, markdownBlob } from './api.js';
 import { Markdown } from './markdown.jsx';
 import { Reader } from './reader.jsx';
 import { ReadingFigure, ReadingSources } from './interaction-reader.jsx';
+import { Followups } from './reading-tools.jsx';
+import { MethodWorkspace } from './method-workspace.jsx';
+import { ConnectionPicker, EffortField, paperMatches, useAction, useCodexCatalog } from './workbench-fields.jsx';
+import { MotionTabsList, positionHighlight } from './interface-motion.jsx';
 import { figureChapter, figureKeys } from '../server/reading-figures.js';
 import './style.css';
 import './interaction.css';
+import './motion.css';
 
 const empty = { papers: [], jobs: [], connections: [], providers: {}, modes: {} };
 const active = status => ['queued', 'running'].includes(status);
 const stateLabels = { queued: '等待运行', running: '正在生成', completed: '已完成', failed: '生成失败', cancelled: '已停止', interrupted: '上次中断' };
 const readingLabels = { skim: '快速理解问题、方法和主要结论', deep: '完整阅读方法、公式、实验和局限',
-  guided: '在阅读中逐步回答问题并获得反馈', repo: '把论文中的方法和实际代码对起来',
-  compare: '围绕一个问题比较两篇或更多论文', question: '聚焦一个公式、图表或技术疑问' };
+  repo: '沿一个样本理解仓库架构、数据构造和公式实现' };
+const upcomingModes = new Set(['guided', 'compare', 'question']);
+const incoming = new URLSearchParams(location.search);
 
 function useLibrary() {
   const [library, setLibrary] = useState(empty);
@@ -29,18 +35,6 @@ function useLibrary() {
   }, []);
   useEffect(() => { reload().catch(err => setError(err.message)); }, [reload]);
   return { library, ready, error, setError, reload };
-}
-
-function useAction(onError) {
-  const [busy, setBusy] = useState(false);
-  async function run(fn) {
-    setBusy(true);
-    onError('');
-    try { return await fn(); }
-    catch (error) { onError(error.message); }
-    finally { setBusy(false); }
-  }
-  return [run, busy];
 }
 
 function ImportPaper({ onPaper, onError, isMain }) {
@@ -88,6 +82,7 @@ function CodexModelField({ catalog, value, onChange }) {
 function ProviderForm({ library, catalog, onSaved }) {
   const [provider, setProvider] = useState('codex');
   const [codexModel, setCodexModel] = useState('');
+  const [effort, setEffort] = useState('default');
   const [feedback, setFeedback] = useState('');
   const [run, busy] = useAction(setFeedback);
   const [keyMode, setKeyMode] = useState('key');
@@ -103,6 +98,7 @@ function ProviderForm({ library, catalog, onSaved }) {
         const connection = await api('connections', { method: 'POST', json: config });
         form.reset();
         setCodexModel('');
+        setEffort('default');
         await onSaved(connection);
         setFeedback('已添加模型连接。');
       });
@@ -113,7 +109,10 @@ function ProviderForm({ library, catalog, onSaved }) {
       <label>连接名称<input name="label" placeholder={definition?.label}/></label>
       {provider === 'codex' ? <CodexModelField catalog={catalog} value={codexModel} onChange={setCodexModel}/>
         : <label>模型名<input name="model" required placeholder="输入服务商提供的模型标识"/></label>}
-      {provider === 'codex' && <p className="muted">使用本机 Codex CLI。首次使用请安装 CLI 并运行 <code>codex login</code>。</p>}
+      {provider === 'codex' && <>
+        <EffortField connection={{ provider, model: codexModel }} catalog={catalog} value={effort} onChange={setEffort} label="默认思考强度"/>
+        <p className="muted">使用本机 Codex CLI。首次使用请安装 CLI 并运行 <code>codex login</code>。</p>
+      </>}
       {provider === 'compatible' && <label>Base URL<input name="base" type="url" required placeholder="https://服务商/v1"/></label>}
       {provider !== 'codex' && <>
         <label>凭证来源<select value={keyMode} onChange={event => setKeyMode(event.target.value)}>
@@ -131,36 +130,26 @@ function ProviderForm({ library, catalog, onSaved }) {
 
 function CodexModelEditor({ connection, catalog, onSaved, onError }) {
   const [model, setModel] = useState(connection.model || '');
+  const [effort, setEffort] = useState(connection.effort || 'default');
   const [run, busy] = useAction(onError);
   return <form className="codex-model-editor" onSubmit={event => {
     event.preventDefault();
     run(async () => {
-      const updated = await api(`connections/${connection.id}`, { method: 'PATCH', json: { model: model.trim() } });
+      const updated = await api(`connections/${connection.id}`, { method: 'PATCH', json: { model: model.trim(), effort } });
       await onSaved(updated);
     });
   }}>
     <CodexModelField catalog={catalog} value={model} onChange={setModel}/>
-    <button disabled={busy || model.trim() === (connection.model || '')}>保存模型</button>
+    <EffortField connection={{ ...connection, model }} catalog={catalog} value={effort} onChange={setEffort} label="默认思考强度"/>
+    <button disabled={busy || (model.trim() === (connection.model || '') && effort === (connection.effort || 'default'))}>保存模型设置</button>
   </form>;
 }
 
 function Connections({ library, onSaved, onUpdated, onError }) {
   const [run, busy] = useAction(onError);
   const [probe, setProbe] = useState('');
-  const [catalog, setCatalog] = useState({ models: [], loading: true });
   const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    const controller = new AbortController();
-    setCatalog({ models: [], loading: true });
-    api('connections/codex/models', { signal: controller.signal })
-      .then(({ models }) => {
-        if (!controller.signal.aborted) setCatalog(models.length ? { models } : { models, error: 'Codex 没有返回可选模型。' });
-      })
-      .catch(error => {
-        if (!controller.signal.aborted) setCatalog({ models: [], error: error.message });
-      });
-    return () => controller.abort();
-  }, [revision]);
+  const catalog = useCodexCatalog(true, revision);
   return <>
     {catalog.error && <div className="actions catalog-error" role="status">
       <p className="muted">{catalog.error} 可以手动填写 Codex 模型名。</p>
@@ -196,13 +185,6 @@ function Connections({ library, onSaved, onUpdated, onError }) {
   </>;
 }
 
-function ConnectionPicker({ library, value, onChange }) {
-  return <label>使用连接<select value={value || ''} onChange={event => onChange(event.target.value)} required>
-    <option value="" disabled>选择模型连接</option>
-    {library.connections.map(item => <option key={item.id} value={item.id}>{item.label} · {item.model || '本机默认模型'}</option>)}
-  </select></label>;
-}
-
 function StartReading({ paper, library, connection, setConnection, onJob, onChanged, onError }) {
   const [mode, setMode] = useState('');
   const [version, setVersion] = useState(paper.versionId);
@@ -211,25 +193,43 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
   const [repo, setRepo] = useState(null);
   const [interactive, setInteractive] = useState(true);
   const [sendImages, setSendImages] = useState(true);
+  const [effort, setEffort] = useState('connection');
+  const chosenConnection = library.connections.find(item => item.id === connection);
+  const catalog = useCodexCatalog(Boolean(mode && chosenConnection?.provider === 'codex'));
   const [run, busy] = useAction(onError);
   const [repoRun, repoBusy] = useAction(onError);
   const selectedVersion = paper.versions.some(item => item.id === version) ? version : paper.versionId;
-  const canUseInteractive = ['skim', 'deep', 'guided'].includes(mode);
+  const canUseInteractive = ['skim', 'deep', 'guided', 'repo'].includes(mode);
   const selectedRepo = repo ?? paper.repos.at(-1)?.id ?? '';
-  const usedRepo = selectedRepo || (mode === 'repo' ? paper.repos.at(-1)?.id || '' : '');
+  const addRepo = mode === 'repo' && (!selectedRepo || selectedRepo === 'new');
+  const usedRepo = selectedRepo === 'new' ? '' : selectedRepo;
   return <>
-    <section className="panel">
+    <section className="panel reading-launch">
       <h2>选择阅读方式</h2>
-      <div className="mode-grid">{Object.entries(library.modes).map(([key, label]) => <button key={key} aria-pressed={mode === key}
-        onClick={() => { setMode(key); setFocus(''); }}>
-        <strong>{label}</strong><span>{readingLabels[key]}</span>
-      </button>)}</div>
+      <div className="mode-grid">{Object.entries(library.modes).map(([key, label]) => {
+        const upcoming = upcomingModes.has(key);
+        return <button key={key} type="button" disabled={upcoming} aria-pressed={upcoming ? undefined : mode === key}
+          className={upcoming ? undefined : 'pointer-highlight'} onPointerMove={upcoming ? undefined : positionHighlight}
+          onClick={() => { setMode(key); setFocus(''); }}>
+          <strong>{label}{!upcoming && <ArrowUpRight size={16} aria-hidden="true"/>}</strong>
+          <span>{upcoming ? '敬请期待' : readingLabels[key]}</span>
+        </button>;
+      })}</div>
       {mode && <form className="settings-form" onSubmit={event => {
         event.preventDefault();
+        const form = new FormData(event.currentTarget);
         run(async () => {
           const papers = [{ id: paper.id, versionId: selectedVersion }];
           if (mode === 'compare') papers.push(...others.map(id => ({ id })));
-          onJob(await api('jobs', { method: 'POST', json: { mode, papers, focus, repoId: usedRepo, connectionId: connection,
+          let repoId = usedRepo;
+          if (addRepo) {
+            const result = await api('papers/' + paper.id + '/repo', { method: 'POST',
+              json: { url: form.get('repoUrl'), ref: form.get('repoRef') } });
+            repoId = result.id;
+            setRepo(repoId);
+            await onChanged();
+          }
+          onJob(await api('jobs', { method: 'POST', json: { mode, papers, focus, repoId, connectionId: connection, effort,
             interactive: canUseInteractive && interactive, sendImages: canUseInteractive && interactive && sendImages } }));
         });
       }}>
@@ -238,18 +238,28 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
           <label>论文版本<select value={selectedVersion} onChange={event => setVersion(event.target.value)}>{paper.versions.map(item =>
             <option key={item.id} value={item.id}>{item.arxivVersion || item.name} · {item.pages} 页</option>)}</select></label>
         </div>
+        <EffortField connection={chosenConnection} catalog={catalog} value={effort} onChange={setEffort} inherit/>
         {mode === 'compare' && <fieldset><legend>选择对照论文</legend>
           {library.papers.filter(item => item.id !== paper.id).map(item => <label className="check" key={item.id}>
             <input type="checkbox" checked={others.includes(item.id)} onChange={event => setOthers(current =>
               event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))}/>{item.title}</label>)}
           {library.papers.length < 2 && <p className="muted">请先导入第二篇论文。</p>}
         </fieldset>}
-        {(mode === 'repo' || (canUseInteractive && paper.repos.length > 0)) && <label>参考仓库<select
-          value={usedRepo} onChange={event => setRepo(event.target.value)} required={mode === 'repo'}>
-          {mode !== 'repo' && <option value="">仅使用论文</option>}
-          {mode === 'repo' && !paper.repos.length && <option value="">请先关联公开仓库</option>}
-          {paper.repos.map(item => <option key={item.id} value={item.id}>{item.url.split('/').at(-1)} · {item.commit.slice(0, 8)}</option>)}
-        </select></label>}
+        {mode === 'repo' && <fieldset className="repo-start">
+          <legend>本次精读的仓库</legend>
+          <label>仓库快照<select value={addRepo ? 'new' : usedRepo} onChange={event => setRepo(event.target.value)} disabled={busy}>
+            {paper.repos.map(item => <option key={item.id} value={item.id}>{item.url.split('/').slice(-2).join('/')} · {item.commit.slice(0, 8)}</option>)}
+            <option value="new">关联新的公开 GitHub 仓库</option>
+          </select></label>
+          {addRepo && <div className="input-row">
+            <label>仓库地址<input name="repoUrl" type="url" placeholder="https://github.com/owner/repo" required disabled={busy}/></label>
+            <label>分支、标签或提交（可选）<input name="repoRef" maxLength={120} placeholder="默认分支" disabled={busy}/></label>
+          </div>}
+          <p className="muted">仓库提交会随阅读记录保存。实现和数据流程会嵌在对应的论文小节中。</p>
+        </fieldset>}
+        {canUseInteractive && mode !== 'repo' && paper.repos.length > 0 && <label>参考仓库<select value={usedRepo} onChange={event => setRepo(event.target.value)}>
+          <option value="">仅使用论文</option>{paper.repos.map(item =>
+            <option key={item.id} value={item.id}>{item.url.split('/').at(-1)} · {item.commit.slice(0, 8)}</option>)}</select></label>}
         <label>{mode === 'question' ? '你的问题' : '阅读重点（可选）'}
           <textarea rows="2" value={focus} onChange={event => setFocus(event.target.value)} maxLength={4000} required={mode === 'question'}/>
         </label>
@@ -258,10 +268,10 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
           {interactive && <ImagePreference checked={sendImages} onChange={setSendImages}/>}
         </div>}
         <div className="actions"><button className="primary" disabled={busy || repoBusy || !connection || (mode === 'compare' && others.length === 0)}>
-          <Sparkles size={15}/>开始{library.modes[mode]}</button></div>
+          <Sparkles size={15}/>{busy && mode === 'repo' ? '正在准备精读…' : '开始' + library.modes[mode]}</button></div>
       </form>}
     </section>
-    <details className="panel"><summary>关联公开 GitHub 仓库 {paper.repos.length ? `· ${paper.repos.length} 个快照` : ''}</summary>
+    {mode !== 'repo' && <details className="panel"><summary>关联公开 GitHub 仓库 {paper.repos.length ? `· ${paper.repos.length} 个快照` : ''}</summary>
       <form className="settings-form" onSubmit={event => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -278,7 +288,7 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
         <div className="actions"><button disabled={repoBusy}><Braces size={15}/>{repoBusy ? '读取中…' : '读取静态快照'}</button></div>
       </form>
       {paper.repos.map(item => <p key={item.id} className="muted"><a href={item.url + '/tree/' + item.commit} target="_blank" rel="noreferrer">{item.url} · {item.commit.slice(0, 10)}</a></p>)}
-    </details>
+    </details>}
   </>;
 }
 
@@ -324,6 +334,7 @@ function Note({ paper, jobs, onError, revisionSignal }) {
       }}>重新载入</button>
       <span className="muted" role="status">{message || (text !== saved && '有未保存编辑')}</span>
     </div>
+    {saved && <details className="note-render"><summary>查看已保存笔记与出处</summary><Markdown>{saved}</Markdown></details>}
     {snippets.length > 0 && <details className="replace">
       <summary>用阅读成果替换选中的笔记片段</summary>
       <p className="muted">在编辑框中选中要替换的文字，再选择一段已生成的小节。</p>
@@ -351,7 +362,7 @@ function Note({ paper, jobs, onError, revisionSignal }) {
 
 const showSections = job => job.sections.filter(item => item.key !== 'questions');
 
-function RepositoryPanel({ paperId, repoId, onError }) {
+function RepositoryPanel({ paperId, repoId, onError, panelId, onAsk, section }) {
   const [content, setContent] = useState(null);
   const [filename, setFilename] = useState('');
   useEffect(() => {
@@ -364,19 +375,34 @@ function RepositoryPanel({ paperId, repoId, onError }) {
   if (!content) return null;
   const file = content.files.find(item => item.name === filename);
   const base = content.repo.url + '/blob/' + content.repo.commit + '/';
-  return <details className="panel">
-    <summary><Braces size={14}/> 已读取的仓库摘录</summary>
+  return <details className="panel" id={panelId}>
+    <summary><Braces size={14}/> 仓库总览</summary>
     <p className="muted">提交 {content.repo.commit.slice(0, 12)} · 展示本次读到的文件片段</p>
+    <p><a href={content.repo.url + '/tree/' + content.repo.commit} target="_blank" rel="noreferrer">打开固定提交的目录与入口</a></p>
+    {content.repo.sourceIndex?.length > 0 && <p className="muted">源码目录 · {[...new Set(content.repo.sourceIndex.map(name => name.includes('/') ? name.split('/')[0] + '/' : name))].slice(0, 12).join(' · ')}</p>}
     <label>文件<select value={filename} onChange={event => setFilename(event.target.value)}>
       {content.files.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
     </select></label>
     {file && <><a href={base + file.name.split('/').map(encodeURIComponent).join('/')} target="_blank" rel="noreferrer">查看 GitHub 文件</a>
-      <pre className="file-code">{file.content}</pre></>}
+      <pre key={file.name} className="file-code" onMouseUp={event => {
+        const selection = window.getSelection();
+        if (selection && event.currentTarget.contains(selection.anchorNode) && event.currentTarget.contains(selection.focusNode)) {
+          event.currentTarget.dataset.selected = selection.toString();
+        }
+      }}>{file.content}</pre>
+      {onAsk && section && <button onClick={event => {
+        const selected = event.currentTarget.previousElementSibling.dataset.selected;
+        onAsk({ section: section.key, title: section.title, repoId, file: file.name,
+          text: [file.name, selected || file.content.slice(0, 1600)].join('\n') });
+      }}>追问此代码摘录</button>}</>}
   </details>;
 }
 
 function JobView({ job, paper, library, onJob, onError, onNote }) {
   const [resumeConnection, setResumeConnection] = useState(job.connectionId);
+  const [resumeEffort, setResumeEffort] = useState(job.effort || 'connection');
+  const [followupsOpen, setFollowupsOpen] = useState(incoming.get('job') === job.id && incoming.has('thread'));
+  const [intent, setIntent] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [sendImages, setSendImages] = useState(true);
   const [run, busy] = useAction(onError);
@@ -385,8 +411,22 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
   const isLesson = job.mode === 'guided' && job.status === 'completed';
   const visible = showSections(job);
   const figures = job.interaction ? Object.groupBy(figureKeys(job), key => figureChapter(job.mode, key)) : undefined;
-  const canUpgrade = ['skim', 'deep', 'guided'].includes(job.mode) && !(job.formatVersion >= 4) && !active(job.status);
+  const canUpgrade = !active(job.status) && (job.mode === 'repo' ? (!job.repoWalkthroughVersion || !job.interaction)
+    : ['skim', 'deep', 'guided'].includes(job.mode) && !(job.formatVersion >= 4));
   const repo = paper.repos.find(item => item.id === job.repoId);
+  const resumeModel = library.connections.find(item => item.id === resumeConnection);
+  const catalog = useCodexCatalog(canResume && resumeModel?.provider === 'codex');
+  const overviewId = 'repo-overview-' + job.id;
+  const defaultRepo = repo || paper.repos.at(-1);
+  const repositoryPanel = defaultRepo && job.mode !== 'compare' &&
+    <RepositoryPanel paperId={paper.id} repoId={defaultRepo.id} onError={onError}
+      panelId={overviewId} onAsk={openFollowup} section={visible[0]}/>;
+
+  function openFollowup(position) {
+    setIntent({ position });
+    setFollowupsOpen(true);
+    requestAnimationFrame(() => document.getElementById('followups-' + job.id)?.scrollIntoView({ block: 'start' }));
+  }
   function append(section) {
     run(async () => {
       await api(`papers/${paper.id}/append`, { method: 'POST', json: { jobId: job.id, section } });
@@ -410,8 +450,9 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
         {active(job.status) && <button disabled={busy} onClick={() => run(async () => onJob(await api(path + '/stop', { method: 'POST' })))}>停止生成</button>}
         {canResume && <>
           <ConnectionPicker library={library} value={resumeConnection} onChange={setResumeConnection}/>
+          <EffortField connection={resumeModel} catalog={catalog} value={resumeEffort} onChange={setResumeEffort} inherit/>
           <button className="primary" disabled={busy || !resumeConnection} onClick={() => run(async () =>
-            onJob(await api(path + '/resume', { method: 'POST', json: { connectionId: resumeConnection } })))}>用所选连接续跑</button>
+            onJob(await api(path + '/resume', { method: 'POST', json: { connectionId: resumeConnection, effort: resumeEffort } })))}>用所选连接续跑</button>
         </>}
         {job.status === 'completed' && <>
           {job.mode !== 'compare' && <button disabled={busy} onClick={() => append()}>加入主笔记</button>}
@@ -424,18 +465,22 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
       </div>
     </section>
     {canUpgrade && <details className="panel upgrade-reading">
-      <summary>生成交互版</summary>
+      <summary>{job.mode === 'repo' ? '生成新版关联仓库精读' : '生成交互版'}</summary>
       <p className="muted">使用同一论文版本创建一份新记录，原阅读记录与主笔记会保留。</p>
       <ImagePreference checked={sendImages} onChange={setSendImages}/>
       <button className="primary" disabled={busy} onClick={() => run(async () => onJob(await api(path + '/interactive',
-        { method: 'POST', json: { sendImages } })))}>开始生成交互版</button>
+        { method: 'POST', json: { sendImages } })))}>开始生成</button>
     </details>}
-    {job.mode === 'repo' && job.repoId && <RepositoryPanel paperId={paper.id} repoId={job.repoId} onError={onError}/>}
+    {!job.integratedRepo && repositoryPanel}
     {isLesson && <a className="exercise-link" href="#guided-exercise">跳到引导练习</a>}
-    {visible.length > 0 && <Reader key={job.id} id={job.id} sections={visible} busy={busy}
-      figures={figures} renderFigure={name => <ReadingFigure name={name} job={job} repo={repo} busy={busy} onNote={onNote}
+    {visible.length > 0 && <Reader key={job.id} id={job.id} sections={visible} busy={busy} repo={repo}
+      onTool={job.mode !== 'compare' ? openFollowup : undefined}
+      figures={figures} renderFigure={(name, onTool) => <ReadingFigure name={name} job={job} repo={repo} busy={busy} onNote={onNote} onTool={onTool}
         onRetry={key => run(async () => onJob(await api(path + '/component/' + key, { method: 'POST' })))}/>}
       onAppend={job.status === 'completed' && job.mode !== 'compare' ? append : null}/>}
+    {job.integratedRepo && repositoryPanel}
+    {followupsOpen && <Followups job={job} library={library} intent={intent}
+      initialThread={incoming.get('job') === job.id ? incoming.get('thread') : undefined} onNote={onNote} onError={onError}/>}
     <ReadingSources job={job}/>
     {isLesson && <Exercise key={job.id} job={job} library={library} onError={onError}/>}
   </>;
@@ -447,6 +492,9 @@ function Exercise({ job, library, onError }) {
   const [feedback, setFeedback] = useState('');
   const [answer, setAnswer] = useState('');
   const [connection, setConnection] = useState(job.connectionId);
+  const [effort, setEffort] = useState('connection');
+  const model = library.connections.find(item => item.id === connection);
+  const catalog = useCodexCatalog(model?.provider === 'codex');
   const [run, busy] = useAction(onError);
   const root = `jobs/${job.id}`;
   const reload = useCallback(async () => {
@@ -493,12 +541,13 @@ function Exercise({ job, library, onError }) {
       <form onSubmit={event => {
         event.preventDefault();
         run(async () => {
-          setAttempt(await api(root + '/answer', { method: 'POST', json: { questionId: state.question.id, connectionId: connection, answer } }));
+          setAttempt(await api(root + '/answer', { method: 'POST', json: { questionId: state.question.id, connectionId: connection, answer, effort } }));
         });
       }}>
         <label>你的推理<textarea rows="4" value={answer} onChange={event => setAnswer(event.target.value)} required maxLength={6000}/></label>
         <div className="actions">
           <ConnectionPicker library={library} value={connection} onChange={setConnection}/>
+          <EffortField connection={model} catalog={catalog} value={effort} onChange={setEffort} inherit/>
           <button className="primary" disabled={inFlight || busy || !answer.trim() || !connection}>提交</button>
           {inFlight ? <button type="button" onClick={() => run(async () => setAttempt(await api(`jobs/${attemptId}/stop`, { method: 'POST' })))}>停止反馈</button> :
             <button type="button" disabled={busy} onClick={() => run(async () => {
@@ -506,7 +555,7 @@ function Exercise({ job, library, onError }) {
               setAttempt(null); setAnswer(''); setFeedback('');
             })}>暂缓此题</button>}
           {stopped && <button type="button" disabled={busy || !connection} onClick={() => run(async () =>
-            setAttempt(await api(`jobs/${attemptId}/resume`, { method: 'POST', json: { connectionId: connection } })))}>续跑上次反馈</button>}
+            setAttempt(await api(`jobs/${attemptId}/resume`, { method: 'POST', json: { connectionId: connection, effort } })))}>续跑上次反馈</button>}
         </div>
       </form>
     </>}
@@ -515,14 +564,19 @@ function Exercise({ job, library, onError }) {
 
 function App() {
   const { library, ready, error, setError, reload } = useLibrary();
-  const [selected, setSelected] = useState(localStorage.getItem('papermaster.paper') || '');
+  const [selected, setSelected] = useState(incoming.get('paper') || localStorage.getItem('papermaster.paper') || '');
   const [current, setCurrent] = useState(null);
   const [tab, setTab] = useState('read');
+  const [query, setQuery] = useState('');
   const [connection, setConnection] = useState('');
   const [noteSignal, setNoteSignal] = useState(0);
   const [showImport, setShowImport] = useState(false);
   const [run, busy] = useAction(setError);
   const paper = library.papers.find(item => item.id === selected);
+  const foundPapers = library.papers.filter(item => paperMatches(item, query));
+  const requestedPdf = incoming.get('paper') === selected && paper?.versions.find(item => item.id === incoming.get('pdf'));
+  const visibleVersion = requestedPdf || (tab === 'result' && paper?.versions.find(item => item.id === current?.references[0]?.versionId))
+    || paper?.versions.find(item => item.id === paper.versionId);
   const hasActive = active(current?.status);
   const jobId = current?.id;
   const onJob = useCallback(job => {
@@ -533,9 +587,12 @@ function App() {
   }, [reload, setError]);
   useEffect(() => {
     if (!ready) return;
-    const previous = localStorage.getItem('papermaster.job');
+    const previous = incoming.get('job') || (!incoming.has('pdf') && localStorage.getItem('papermaster.job'));
     const job = library.jobs.find(item => item.id === previous && item.references[0]?.id === selected);
-    if (job) api('jobs/' + job.id).then(onJob).catch(error => setError(error.message));
+    if (job) {
+      if (incoming.get('job') === job.id && incoming.get('chapter')) localStorage.setItem('papermaster.chapter.' + job.id, incoming.get('chapter'));
+      api('jobs/' + job.id).then(onJob).catch(error => setError(error.message));
+    }
     else if (!paper && library.papers.length) setSelected(library.papers[0].id);
   }, [ready]);
   useEffect(() => {
@@ -569,9 +626,11 @@ function App() {
   return <div className="workspace">
     <a className="skip-link" href="#paper-workspace">跳到阅读区</a>
     <header className="topbar">
-      <div className="brand"><span><Layers3 size={20}/></span>PaperMaster</div>
-      <div className="actions">
-        <button aria-label={tab === 'connections' ? '返回阅读' : '模型连接'}
+      <div className="brand"><span><BookOpen size={19} aria-hidden="true"/></span>PaperMaster</div>
+      <nav className="actions topbar-actions" aria-label="工作区工具">
+        <button aria-pressed={tab === 'methods'} onClick={() => setTab(tab === 'methods' ? (current ? 'result' : 'read') : 'methods')}>
+          <Layers3 size={16}/>主题方法表</button>
+        <button aria-pressed={tab === 'connections'} aria-label={tab === 'connections' ? '返回阅读' : '模型连接'}
           title={tab === 'connections' ? '返回阅读' : '模型连接'}
           onClick={() => setTab(tab === 'connections' ? (current ? 'result' : 'read') : 'connections')}>
           <KeyRound size={16}/><span className="topbar-label">{tab === 'connections' ? '返回阅读' : '模型连接'}</span>
@@ -579,30 +638,42 @@ function App() {
         <button aria-label="备份" title="备份" disabled={busy}
           onClick={() => run(async () => download(await api('backup', { blob: true }), 'papermaster-backup.tar.gz'))}>
           <ArrowDownToLine size={16}/><span className="topbar-label">备份</span></button>
-        <button className="primary" onClick={() => setShowImport(value => !value)}><Plus size={16}/>导入论文</button>
-      </div>
+        <button className="primary" aria-expanded={showImport || (ready && !paper && !['connections', 'methods'].includes(tab))}
+          onClick={() => setShowImport(value => !value)}><Plus size={16}/>导入论文</button>
+      </nav>
     </header>
     <aside className="rail" aria-labelledby="library-label">
-      <div className="rail-heading" id="library-label">本地论文库 <span>{library.papers.length}</span></div>
-      <nav aria-label="论文库">{library.papers.map(item => <button key={item.id} aria-current={item.id === selected ? 'page' : undefined} onClick={() => select(item.id)}>
-        <FileText size={15}/><span>{item.title}</span></button>)}</nav>
+      <div className="rail-content">
+        <div className="rail-heading" id="library-label">本地论文库 <span>{library.papers.length}</span></div>
+        <div className="library-search-field"><Search size={16} aria-hidden="true"/>
+          <input className="library-search" aria-label="搜索论文库" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="标题或论文链接"/>
+        </div>
+        <nav aria-label="论文库">{foundPapers.map(item => <button key={item.id} aria-current={item.id === selected ? 'page' : undefined} onClick={() => select(item.id)}>
+          <FileText size={15}/><span>{item.title}</span></button>)}</nav>
+        {query.trim() && !foundPapers.length && <p className="rail-empty muted">没有匹配的论文。</p>}
+      </div>
     </aside>
     <main id="paper-workspace" tabIndex={-1}>
       {error && <div className="error global" role="alert">{error}<button onClick={() => setError('')}>关闭</button></div>}
-      {(showImport || (ready && !paper && tab !== 'connections')) && <ImportPaper isMain={!paper && tab !== 'connections'} onError={setError} onPaper={async result => {
+      {(showImport || (ready && !paper && !['connections', 'methods'].includes(tab))) && <ImportPaper isMain={!paper && tab !== 'connections'} onError={setError} onPaper={async result => {
         await reload(); select(result.id); setShowImport(false);
       }}/>}
       {!ready && <p role="status">正在加载论文库…</p>}
       {tab === 'connections' && <Connections library={library} onError={setError} onUpdated={reload}
         onSaved={async item => { await reload(); setConnection(item.id); }}/>}
-      {paper && tab !== 'connections' && <>
-        <header className="paper-header">
-          <div className="eyebrow"><BookOpen size={14}/>{paper.arxivId ? 'arXiv ' + paper.arxivId : '本地论文'}</div>
-          <h1>{paper.title}</h1>
-          <p className="muted">{paper.authors}</p>
-          <div className="actions">
-            {paper.versions.at(-1)?.url && <a href={paper.versions.at(-1).url} target="_blank" rel="noreferrer">论文主页 <ArrowUpRight size={14}/></a>}
-            <button onClick={() => run(async () => download(await api(`papers/${paper.id}/pdf`, { blob: true }), paper.title + '.pdf'))}>下载原件</button>
+      {tab === 'methods' && <MethodWorkspace library={library} defaultConnection={connection} onError={setError}/>}
+      {paper && !['connections', 'methods'].includes(tab) && <>
+        <header className="paper-header" data-compact={tab !== 'read'}>
+          <div className="paper-heading">
+            <div className="eyebrow"><BookOpen size={14} aria-hidden="true"/>{paper.arxivId ? 'arXiv ' + paper.arxivId : '本地论文'}</div>
+            <h1>{paper.title}</h1>
+            {paper.authors && <p className="paper-authors">{paper.authors}</p>}
+          </div>
+          <PaperFacts paper={paper} version={visibleVersion}/>
+          <div className="actions paper-actions">
+            {visibleVersion?.url && <a href={visibleVersion.url} target="_blank" rel="noreferrer">论文主页 <ArrowUpRight size={14}/></a>}
+            {visibleVersion && <button onClick={() => run(async () => download(await api(`papers/${paper.id}/pdf/${visibleVersion.id}`, { blob: true }), paper.title + '.pdf'))}>
+              下载原件</button>}
             <details className="renamer"><summary>修改标题</summary><form className="input-row" onSubmit={event => {
               event.preventDefault();
               const title = new FormData(event.currentTarget).get('title');
@@ -610,11 +681,12 @@ function App() {
             }}><input name="title" aria-label="论文标题" defaultValue={paper.title} maxLength={255} required/><button>保存</button></form></details>
           </div>
         </header>
-        <Tabs.Root value={tab} onValueChange={setTab}>
-          <Tabs.List className="tabs" aria-label="论文工作区">
+        {requestedPdf && <PinnedPdf paper={paper} version={requestedPdf} page={incoming.get('page')} onError={setError}/>}
+        <Tabs.Root className="paper-workspace-tabs" value={tab} onValueChange={setTab}>
+          <MotionTabsList className="tabs" value={tab} aria-label="论文工作区">
             <Tabs.Trigger value="read">阅读</Tabs.Trigger><Tabs.Trigger value="result" disabled={!current}>当前任务</Tabs.Trigger>
             <Tabs.Trigger value="history">阅读记录</Tabs.Trigger><Tabs.Trigger value="note">主笔记</Tabs.Trigger>
-          </Tabs.List>
+          </MotionTabsList>
           <Tabs.Content value="read"><StartReading key={paper.id} {...{ paper, library, connection, setConnection, onJob, onChanged: reload, onError: setError }}/></Tabs.Content>
           <Tabs.Content value="result">{current && <JobView key={current.id} job={current} {...{ paper, library, onJob, onError: setError, onNote: () => setNoteSignal(value => value + 1) }}/>}</Tabs.Content>
           <Tabs.Content value="history"><section className="panel">
@@ -630,6 +702,37 @@ function App() {
       </>}
     </main>
   </div>;
+}
+
+function PaperFacts({ paper, version }) {
+  if (!version) return null;
+  return <dl className="paper-facts" aria-label="论文资料">
+    <div><dt>版本</dt><dd title={version.arxivVersion || version.name}>{version.arxivVersion || version.name}</dd></div>
+    <div><dt>页数</dt><dd>{version.pages}</dd></div>
+    <div><dt>仓库快照</dt><dd>{paper.repos.length}</dd></div>
+  </dl>;
+}
+
+function PinnedPdf({ paper, version, page, onError }) {
+  const [href, setHref] = useState('');
+  useEffect(() => {
+    let source;
+    const controller = new AbortController();
+    api('papers/' + paper.id + '/pdf/' + version.id, { blob: true, signal: controller.signal }).then(blob => {
+      if (controller.signal.aborted) return;
+      source = URL.createObjectURL(blob);
+      setHref(source + (/^[1-9]\d*$/.test(page || '') ? '#page=' + page : ''));
+    }).catch(error => { if (!controller.signal.aborted) onError(error.message); });
+    return () => {
+      controller.abort();
+      if (source) URL.revokeObjectURL(source);
+    };
+  }, [paper.id, version.id, page, onError]);
+  return <section className="panel">
+    <h2>原始论文证据</h2>
+    <p>{version.arxivVersion || version.name}{page && ' · 第 ' + page + ' 页'}</p>
+    {href ? <a href={href} target="_blank" rel="noreferrer">打开对应版本 PDF</a> : <p role="status">正在加载原论文…</p>}
+  </section>;
 }
 
 createRoot(document.getElementById('root')).render(<App/>);

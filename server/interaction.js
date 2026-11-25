@@ -2,6 +2,8 @@ import { AppError } from './errors.js';
 import { demoOperations, solveDemo } from './interaction-math.js';
 import { prepareSource, sourcesIn } from './interaction-source.js';
 import { components } from './reading-figures.js';
+import { numberedExcerpt } from './evidence.js';
+import { repositoryContext } from './repository-reading.js';
 
 const bad = message => new AppError(message, 422, 'interactive_content');
 const text = (value, max = 500) => typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -47,7 +49,8 @@ function codeReference(value, repo) {
   const file = repo && value && repo.find(item => item.name === value.file);
   if (!file) return undefined;
   const symbol = text(value.symbol, 80);
-  return { file: file.name, ...(symbol && file.content.includes(symbol) && { symbol }) };
+  const line = symbol && Object.entries(numberedExcerpt(file)).find(([, code]) => code.includes(symbol));
+  return { file: file.name, ...(line && { symbol, line: Number(line[0]) }) };
 }
 
 function parseDemo(value, graph) {
@@ -142,6 +145,7 @@ const shapes = {
 
 function buildInteractionPrompt(key, material, sources, graph, source, excerpt, images, job, repo) {
   const kind = key.startsWith('graph') ? 'graph' : key.startsWith('formula') ? 'formula' : 'table';
+  const implementation = repositoryContext(job.repositoryStudy, key === 'graph' ? 'overview' : kind === 'table' ? 'evidence' : 'mechanism');
   const paper = { title: material.paper.title, version: material.version.arxivVersion || material.version.name, focus: job.focus };
   const prioritized = kind === 'formula'
     ? material.pages.filter(page => /\b(?:algorithm|equation|method|propose|loss|attention)\b/i.test(page)).slice(0, 9)
@@ -152,10 +156,12 @@ function buildInteractionPrompt(key, material, sources, graph, source, excerpt, 
     key === 'graph' ? '画出论文的原创架构或方法主线，标出与旧做法真正不同的模块。可提供 title。泛读仅保留 3–6 个关键步骤。' : '',
     key === 'graphDetail' ? '给出一个核心机制的内部数据流，用 3–7 个步骤解释怎样得到结果。可提供 title。聚焦已有总览节点中的一个机制，不能复述整张总览图。' : '',
     kind === 'graph' && repo ? '参考提供的仓库快照组织节点和真实可证的调用。每个可对应的节点可加 code: {file, symbol}，file 必须是下方已读文件的原路径，symbol 必须出现在摘录里。仓库结构和论文示意不同的地方写进说明，证据不足的调用不画成已确认。' : '',
+    implementation.length ? '将论文交互中的步骤和仓库中已核查的对应模块对起来。公式定义与实验数字仍以论文和原表为准。' : '',
     kind === 'formula' ? '一次只解释一个直观问题，优先只开放 1–3 个控制量，先说该改变哪个量、观察哪个输出。额外返回 2–3 个 scenarios，每项形如 {"label":"容易理解的情景","values":{"x":2},"observe":"改变的量、结果或原因"}，使用可验证的输入。优先选有明显对照的例子，例如相同与不同、无重叠与重叠等。' : '',
     key === 'formula2' ? '选择不同的公式或计算阶段，避免重复第一组变量关系。两组可以对应不同模块，或同一模块内不同运算。' : '',
     '标识必须以英文字母开头，只含英文字母、数字和下划线，最多 32 字符。每个标识只定义一次，先定义后引用。如材料不足以生成该组件，返回 {"unavailable":"说明缺少的材料或关系"}。',
     JSON.stringify({ paper, ...(graph && { graph }), ...(key === 'graph' && { sources }),
+      ...(implementation.length && { implementation }),
       ...(repo && kind === 'graph' && { repository: repo.map(({name, content}) => ({name, content: content.slice(0, 3400)})) }),
       ...(key === 'formula2' && { firstDemo: job.interaction.components.formula?.data && {
         title: job.interaction.components.formula.data.title, latex: job.interaction.components.formula.data.latex,
@@ -203,7 +209,7 @@ export async function generateInteraction({ library, models, connection, job, ma
       const data = layout ? parseGraph(value, sources, repo) : formula ? parseDemo(value, demoGraph) : readTable(value, asset);
       const first = job.interaction.components.formula?.data;
       if (key === 'formula2' && first?.latex.replace(/\s/g, '') === data.latex.replace(/\s/g, '')) throw bad('第二个演示重复了第一个公式。');
-      return { data, model: response.model };
+      return { data, model: response.model, effort: response.effort, effectiveEffort: response.effectiveEffort };
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw bad('该组件的字段格式无效。可单独重试。');

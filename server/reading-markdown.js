@@ -84,7 +84,7 @@ export function splitReadingMarkdown(value, hasDemo) {
   };
 }
 
-export function readingFigureParts(value, keys = []) {
+export function readingFigureParts(value, keys = [], appendMissing = true) {
   const parts = [];
   const remaining = new Set(keys);
   let lines = [];
@@ -114,6 +114,6 @@ export function readingFigureParts(value, keys = []) {
     lines.push(line);
   }
   flush();
-  for (const key of remaining) parts.push({ key });
+  if (appendMissing) for (const key of remaining) parts.push({ key });
   return parts;
 }

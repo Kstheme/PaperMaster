@@ -1,59 +1,53 @@
 # PaperMaster
 
-**Read research papers by exploring their methods, testing their equations, and comparing their results.**
+**Follow a research idea from paper to implementation.**
 
-[简体中文](README.zh-CN.md) · [Install](#install) · [Quick start](#quick-start) · [Demos](#demos) · [npm](https://www.npmjs.com/package/papermaster-reader)
+[简体中文](README.zh-CN.md) · [Install](#install) · [Workflow](#workflow) · [Releases](https://github.com/Kstheme/PaperMaster/releases) · [npm](https://www.npmjs.com/package/papermaster-reader)
 
-PaperMaster is a local reading workspace for research papers. Import a PDF or an arXiv link, then follow a method from its architecture diagram to an interactive equation and the experiments that test it. Save your findings as Markdown.
+PaperMaster is a local workspace for reading research papers. Import a PDF or an arXiv link, explore a method inside the article, and connect what you learn to the original paper, a pinned repository commit, and your own notes.
+
+![PaperMaster showing the Draw2Think repository walkthrough, with a geometry demo, implementation steps, and source links](docs/images/repository-workbench.webp)
+
+*Draw2Think repository reading. A teaching sample connects the paper's state and observation model to the code that returns an angle.*
 
 ## Install
 
-**Requires Node.js 22.16 or later.** The npm package includes the built interface.
+Requires **Node.js 22.16 or later**. Install **Git** to associate a public GitHub repository. The package ships with the built interface.
 
 ```sh
-npm install -g papermaster-reader
+npm install -g papermaster-reader@latest
 papermaster
 ```
 
-PaperMaster opens your browser and prints its local URL. In Windows PowerShell, use `npm.cmd` and `papermaster.cmd` if script execution policy blocks the shims.
+To install a specific GitHub release, download its `papermaster-reader-<version>.tgz` from [Releases](https://github.com/Kstheme/PaperMaster/releases), then run `npm install -g ./papermaster-reader-<version>.tgz`. On Windows, use `npm.cmd` and `papermaster.cmd` if PowerShell blocks the script shims.
 
-## Quick start
+PaperMaster opens a browser and prints its local address. Use `papermaster --help` for the port and data-directory options.
 
-1. Open **模型连接** (Model connections) and add a provider. For a **Codex subscription**, install the Codex CLI and run `codex login` with your ChatGPT account. You can select a model from the CLI's list.
-2. Click **导入论文** (Import paper), then upload a text-based PDF or paste an arXiv URL.
-3. Choose **完整精读** (Deep reading). Follow the interactive diagrams in the text, try the formula scenarios, and compare results in the experiment chapter. **泛读** (Skim) includes an animated overview. Select a repository snapshot to ground the diagrams in the available code.
-4. Save an observation to the main note or export the reading as Markdown. On an older reading, **生成交互版** creates a new interactive record from the same paper version.
+## Workflow
 
-## Demos
+1. **Connect a model.** Open **模型连接** (Model connections). For Codex, install the Codex CLI and sign in with `codex login`. You can also configure an API provider.
+2. **Bring in a paper.** Use **导入论文** (Import paper) with an arXiv URL or a PDF that has extractable text.
+3. **Choose how to read.** Start with **泛读** (Skim), use **完整精读** (Deep reading) for methods and experiments, or use **关联仓库精读** (Repository reading) to follow the implementation at a specific commit.
+4. **Keep what matters.** Ask a follow-up from a passage or implementation step, save part of the answer to the main note, or export the reading to Markdown.
 
-Both recordings use reading results for [Visual Scaffolding: Toward Native Multimodal Reasoning](https://arxiv.org/abs/2610.25247v1).
+## Inside the workspace
 
-**Skim the architecture.** Play the flow inside the article and watch the diagram and the selected module explanation advance together.
-
-![The Visual Scaffolding architecture playing step by step in a PaperMaster skim](docs/images/visual-scaffolding-skim.gif)
-
-**Try a formula in context.** Switch between scenarios and see which grid cells are selected when their scores cross the threshold.
-
-![The Visual Scaffolding formula lab changing its selection as scenarios change](docs/images/visual-scaffolding-formula.gif)
-
-## What you can do
-
-| Feature | Workflow |
+| Workspace | What you can do |
 | --- | --- |
-| Architecture explorer | Play or step through a method inline. Select a module to inspect its input, operation, and output. |
-| Formula lab | Try preset scenarios or edit inputs. Deep reading can include separate labs for different steps of the method. |
-| Experiment comparison | Filter reported results and ablations, compare rows, and open the original figures or tables. |
-| Guided reading | Work through questions with feedback and resume where you left off. |
-| Repository reading | Connect a public GitHub repository and read the implementation at a recorded commit. Requires Git. |
-| Markdown notes | Save experiment comparisons or a specific formula run, and export results for later use. |
+| Interactive reading | Step through the paper's architecture, vary formula inputs, and compare reported results or ablations. Open the original figures and tables where available. |
+| Repository reading | Follow a representative sample, inspect inputs and outputs, compare paper concepts with source lines, and try a prediction exercise where the evidence supports one. Teaching simulations are labeled. |
+| Follow-ups and main notes | Continue a question from its reading context, check the supporting evidence, and save selected excerpts to a Markdown note. |
+| Topic method tables | Review methods against a research topic, keep edits when adding papers, and confirm a snapshot for Markdown and Auto Research JSON export. See the [export format](docs/auto-research-export.md). |
 
-## Model providers and data
+**Coming soon in the reading launcher:** Guided reading, multi-paper comparison, and standalone questions. In-context follow-ups are available from a reading.
 
-Connect a Codex subscription, an OpenAI-compatible endpoint, or a native OpenAI, Claude, or Gemini API. API connections use an environment variable or the Windows/macOS system credential store.
+## Models and local data
 
-The paper library, reading history, and notes stay on your machine. Generation sends the needed paper excerpts to your selected model provider. The reading form lets you choose whether to include figure and table crops. Import currently requires a PDF with extractable text. Interactive coverage depends on the material available in the paper.
+PaperMaster supports Codex, OpenAI-compatible endpoints, and native OpenAI, Claude, and Gemini APIs. Configure API credentials through an environment variable or the Windows/macOS credential store.
 
-## Development
+The library, reading history, and notes are stored locally. Generation sends relevant paper excerpts and, for repository reading, selected source excerpts to the configured provider. Figure and table crops are optional. Use the workspace's **备份** (Backup) action to export a copy of your library.
+
+## Develop from source
 
 ```sh
 git clone https://github.com/Kstheme/PaperMaster.git
@@ -64,4 +58,4 @@ npm run build
 npm start
 ```
 
-Use `papermaster --help` for local server options. See the [interactive reading design](docs/interactive-reading-design.md) and [platform design](docs/platform-design.md) for implementation details. Report reproducible bugs at [GitHub Issues](https://github.com/Kstheme/PaperMaster/issues).
+[Interactive reading design](docs/interactive-reading-design.md) · [Platform design](docs/platform-design.md) · [Report an issue](https://github.com/Kstheme/PaperMaster/issues)

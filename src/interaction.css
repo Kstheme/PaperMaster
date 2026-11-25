@@ -1,13 +1,15 @@
 .interactive-options { display: grid; gap: 7px; padding: 10px 13px; background: var(--inset); border-radius: 6px; }
+.upgrade-reading.panel { padding-block: 8px; }
+.upgrade-reading > summary { min-height: 44px; align-content: center; font-size: 14px; }
 .upgrade-reading > p, .upgrade-reading > label { margin: 8px 0; }
 .reader-inline .reader-content { max-width: 1020px; }
-.reader-inline .chapter-body > .markdown, .reader-inline .chapter-summary { max-width: 74ch; }
+.reader-inline .chapter-body > .markdown, .reader-inline .chapter-summary { max-width: 50rem; }
 .chapter-figure { min-width: 0; container-type: inline-size; margin: 1.5rem 0; }
 .chapter-figure .experiment-table { margin-bottom: .6rem; }
 .reading-sources { margin: 1rem 0; }
 .inline-flow { display: grid; gap: 12px; padding: clamp(12px, 2.4vw, 22px); margin: 0; background: var(--surface);
   border: 1px solid var(--line); border-radius: 9px; }
-.inline-flow figcaption > h3 { font: 600 clamp(21px, 3vw, 28px)/1.24 Georgia, "Songti SC", SimSun, serif; }
+.inline-flow figcaption > h3 { font: 700 clamp(21px, 3vw, 28px)/1.24 var(--display); }
 .inline-flow figcaption .markdown { max-width: 71ch; }
 .inline-flow .module-detail { padding: 11px 13px; background: var(--inset); }
 .module-source { display: inline-block; overflow-wrap: anywhere; font: 12px/1.5 "Cascadia Mono", Consolas, monospace; }
@@ -17,10 +19,10 @@
 @media (prefers-reduced-motion: reduce) { .animated-flow-edge { display: none; } }
 .lab-scenarios { margin-bottom: 12px; }
 .lab-scenarios [aria-pressed="true"],
-.flow-node[aria-pressed="true"] { color: #fffefa; border-color: #2b5c51; background: #2b5c51; }
+.flow-node[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--tint); }
 .lab-scenarios p { margin-top: 7px; color: var(--accent); font-size: 14px; }
 .flow-frame { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px;
-  background: radial-gradient(circle, #c3cbc0 1px, transparent 1.5px) 0 0 / 16px 16px, #f1f3eb; }
+  background: radial-gradient(circle, var(--diagram-grid) 1px, transparent 1.5px) 0 0 / 16px 16px, var(--inset); }
 .flow-canvas { position: relative; margin: 0 auto; }
 .flow-canvas svg { position: absolute; inset: 0; pointer-events: none; }
 .flow-node { position: absolute; display: flex; justify-content: center; align-items: center; text-align: center;
@@ -34,7 +36,7 @@
 .module-detail, .formula-lab, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
   border-radius: 9px; background: var(--surface); min-width: 0; }
 .module-detail { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px 28px; }
-.module-detail h3, .formula-lab h3, .experiment-table h3 { margin-top: 4px; font: 600 clamp(22px, 3vw, 28px)/1.24 Georgia, "Songti SC", SimSun, serif; }
+.module-detail h3, .formula-lab h3, .experiment-table h3 { margin-top: 4px; font: 700 clamp(22px, 3vw, 28px)/1.24 var(--display); }
 .module-detail dl { display: grid; gap: 3px; margin: 0; }
 .module-detail dl > div { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); }
 .module-detail dl > div:last-child { border-bottom: 0; }
@@ -42,10 +44,10 @@
 .module-detail dd { margin: 0; }
 .module-detail dd .markdown > * { margin: 6px 0; }
 .interaction-heading { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; justify-content: space-between; }
-.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid #a65c39; background: #f6f0e6; margin: 14px 0; }
+.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); margin: 14px 0; }
 .lab-stage { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: clamp(12px, 2vw, 20px); align-items: start; }
 .lab-visual, .lab-inputs { min-width: 0; }
-.lab-visual { padding: 10px; border: 1px solid var(--line); background: #f8f7ef; border-radius: 8px; }
+.lab-visual { padding: 10px; border: 1px solid var(--line); background: var(--inset); border-radius: 8px; }
 .geometry { margin: 0; }
 .geometry svg { display: block; width: min(100%, 360px); margin: auto; }
 .geometry figcaption, .plot-legend { text-align: center; color: var(--muted); font-size: 12px; }
@@ -66,7 +68,7 @@
 .lab-bars i { display: block; height: 6px; min-width: 0; border-radius: 1px; }
 .lab-curve { width: 100%; display: block; padding-top: 10px; }
 .lab-note { margin-top: 12px; }
-.component-state { padding: 13px 17px; border: 1px dashed #b4c1b7; border-radius: 8px; background: var(--surface); }
+.component-state { padding: 13px 17px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface); }
 .component-state p { margin: 3px 0 7px; }
 .experiment-controls { margin: 12px 0; align-items: flex-end; }
 .experiment-controls > label { min-width: 0; flex: 1 1 135px; }
@@ -93,4 +95,101 @@
 }
 @media (max-width: 570px) {
   .lab-input input[type="range"] { min-height: 32px; }
+}
+.repository-workbench {
+  color-scheme: dark;
+  --background: var(--studio-background);
+  --surface: var(--studio-surface);
+  --inset: var(--studio-inset);
+  --text: var(--studio-text);
+  --muted: var(--studio-muted);
+  --accent: var(--studio-accent);
+  --tint: var(--studio-tint);
+  --line: var(--studio-line);
+  --line-strong: #83907c;
+  --signal: #f5c791;
+  --diagram-grid: var(--studio-line);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 12px 28px #2428221c;
+  container-type: inline-size;
+  line-height: 1.65;
+}
+.repository-workbench-header {
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px;
+  padding: clamp(16px, 2.5vw, 24px);
+  background: var(--background);
+  border-radius: 15px 15px 0 0;
+}
+.repository-workbench-header > div { flex: 1 1 260px; min-width: 0; }
+.repository-workbench h3 { font: 700 clamp(22px, 2.1vw, 31px)/1.25 var(--display); }
+.repository-workbench h4 { font-size: 17px; }
+.repository-workbench-header p { color: var(--muted); margin-top: 8px; max-width: 46ch; font-size: 14px; }
+.repository-commit {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; min-height: 44px;
+  color: var(--muted); font: 13px "Cascadia Mono", Consolas, monospace;
+}
+.repository-workbench :is(button, summary) { min-height: 44px; }
+.repository-views, .repository-view { padding-inline: clamp(14px, 2.5vw, 24px); }
+.repository-views { display: flex; flex-wrap: wrap; column-gap: 18px; border-bottom: 1px solid var(--line); background: var(--background); }
+.repository-views button {
+  justify-content: center; margin-bottom: -1px; padding: 4px 2px;
+  background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); font-size: 14px;
+}
+.repository-views button[data-state=active], .repository-views button:hover { border-bottom-color: var(--accent); color: var(--accent); }
+.repository-views button[data-state=active] { font-weight: 650; }
+.repository-view { padding-block: 18px; }
+.repository-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 8px; margin-bottom: 14px; }
+.repository-steps button {
+  display: flex; align-items: center; text-align: left; gap: 8px; padding: 8px 10px;
+  border-radius: 8px; background: var(--inset); font-size: 14px; line-height: 1.35;
+}
+.repository-steps button[aria-pressed=true] { background: var(--tint); }
+.repository-steps span { color: var(--muted); font: 12px "Cascadia Mono", Consolas, monospace; }
+.repository-steps button[aria-pressed=true] span { color: var(--accent); }
+.repository-pair, .repository-comparison { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.repository-pair:has(> .repository-sample) { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+.repository-pane { min-width: 0; padding: clamp(12px, 2vw, 18px); border: 1px solid var(--line); border-radius: 8px; background: var(--inset); }
+.repository-formula { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-block: 10px; }
+.repository-formula .markdown > p { margin: 0; }
+.repository-formula .markdown > p > .katex { overflow: visible; }
+.repository-fields { margin: 12px 0; }
+.repository-fields > div { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.repository-fields dt, .repository-caption, .repository-readout { color: var(--muted); font-size: 14px; }
+.repository-fields dt { font-weight: 650; }
+.repository-fields dd, .repository-fields dd p, .repository-readout p { margin: 0; }
+.repository-sample-description { margin-bottom: 10px; }
+.repository-pane summary, .repository-demo-details summary { align-content: center; color: var(--accent); }
+.repository-pane pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.repository-pair pre, .repository-comparison pre { background: var(--background); border-radius: 6px; padding: 10px; font-size: 13px; }
+.repository-sources { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.repository-sources .evidence-links { flex: 1 1 230px; padding: 0; margin: 0; display: flex; gap: 4px 14px; flex-wrap: wrap; list-style: none; }
+.repository-sources .evidence-links a { display: inline-flex; align-items: center; min-height: 32px; overflow-wrap: anywhere; }
+.repository-sources button { white-space: nowrap; font-size: 14px; }
+.repository-comparison { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.repository-comparison > div { min-width: 0; }
+.repository-comparison h4 + p { margin-top: 8px; }
+.repository-demo-details { margin-top: 12px; }
+.repository-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.repository-choices:last-child { margin-bottom: 0; }
+.repository-choices button { justify-content: center; font-size: 14px; }
+.repository-readout { display: flex; justify-content: space-between; align-items: center; gap: 4px 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.repository-readout output { color: var(--signal); font: 600 22px monospace; }
+.repository-canvas {
+  width: 100%; height: 162px; display: block; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px;
+  background: radial-gradient(ellipse at 50% 72%, var(--tint), var(--background) 74%);
+}
+.repository-sample input[type=range] { width: 100%; min-height: 44px; accent-color: var(--accent); margin: 0; padding: 0; border: 0; background: transparent; }
+.repository-reuse { margin-top: 14px; padding: 10px 14px; border-left: 2px solid var(--accent); background: var(--tint); border-radius: 0 6px 6px 0; }
+.repository-reuse .markdown > :last-child { margin-bottom: 0; }
+@container (max-width: 650px) {
+  .repository-pair, .repository-pair:has(> .repository-sample), .repository-comparison { grid-template-columns: minmax(0, 1fr); }
+}
+@container (max-width: 390px) {
+  .repository-views { column-gap: 12px; }
+  .repository-views button { font-size: 13px; }
+  .repository-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .repository-steps button { overflow-wrap: anywhere; }
 }

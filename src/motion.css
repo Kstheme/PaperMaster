@@ -1,0 +1,99 @@
+:root {
+  --motion-press: 110ms;
+  --motion-control: 180ms;
+  --motion-content: 260ms;
+  --motion-slide: 300ms;
+  --motion-out: cubic-bezier(.2, .75, .3, 1);
+}
+
+.moving-tabs { position: relative; }
+.moving-tabs[data-indicator] button[data-state=active]:not(:hover) { border-bottom-color: transparent; }
+.moving-tabs::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1px;
+  height: 2px;
+  pointer-events: none;
+  background: var(--accent);
+  opacity: 0;
+  transform-origin: left center;
+  transform: translate(var(--tab-x, 0px), var(--tab-y, 0px)) scaleX(var(--tab-width, 0));
+}
+.moving-tabs[data-indicator]::after { opacity: 1; }
+
+.pointer-highlight { position: relative; isolation: isolate; overflow: clip; }
+.pointer-highlight::before {
+  content: "";
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--highlight-color) 0%, transparent 70%);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(calc(var(--highlight-x, 0px) - 150px), calc(var(--highlight-y, 0px) - 150px));
+}
+.mode-grid .pointer-highlight { --highlight-color: #a1bd8970; }
+.repository-canvas-frame { --highlight-color: #cfef9b2e; }
+.repository-canvas-frame::before { z-index: 0; }
+.repository-readout-change { display: inline-block; transform-origin: right center; }
+.repository-canvas-frame {
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: inset 0 0 26px #13181280;
+  background: radial-gradient(ellipse at 56% 64%, #47503a, var(--background) 74%);
+}
+.repository-canvas-frame .repository-canvas { position: relative; margin-bottom: 0; border: 0; background: transparent; }
+.paper-facts, .repository-workbench { border-top-color: color-mix(in srgb, var(--studio-line), var(--studio-muted) 28%); }
+
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled), input, textarea, select {
+    transition: background-color var(--motion-control), border-color var(--motion-control),
+      color var(--motion-control), box-shadow var(--motion-control), transform var(--motion-press) var(--motion-out);
+  }
+  button:not(:disabled):active { transform: scale(.98); }
+  .mode-grid button strong svg { transition: transform var(--motion-control) var(--motion-out), color var(--motion-control); }
+
+  @media (hover: hover) and (pointer: fine) {
+    .pointer-highlight::before { transition: opacity var(--motion-content) var(--motion-out); }
+    .pointer-highlight:hover::before { opacity: 1; }
+    .mode-grid button:hover:not(:disabled) { box-shadow: 0 5px 14px #342f2114; }
+    .mode-grid button:is(:hover, :focus-visible) strong svg { transform: translate(2px, -2px); color: var(--accent); }
+  }
+
+  .moving-tabs::after { transition: transform var(--motion-slide) var(--motion-out); }
+  .paper-workspace-tabs > [role=tabpanel][data-state=active],
+  .repository-view[data-state=active] {
+    animation: content-enter var(--motion-content) var(--motion-out);
+  }
+  .repository-step-entry, .settings-form, .repository-view [role=status] > :first-child {
+    animation: content-enter var(--motion-control) var(--motion-out);
+  }
+  .repository-readout-change { animation: readout-enter var(--motion-content) var(--motion-out); }
+
+  @supports selector(details::details-content) {
+    :is(.panel, .repo-reading-evidence, .repository-demo-details, .repository-pane > details)::details-content {
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity var(--motion-content), transform var(--motion-content) var(--motion-out);
+    }
+    :is(.panel, .repo-reading-evidence, .repository-demo-details, .repository-pane > details)[open]::details-content {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+@keyframes content-enter {
+  from { opacity: .66; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes readout-enter {
+  from { opacity: .7; transform: scale(.94); text-shadow: 0 0 12px var(--signal); }
+  to { opacity: 1; transform: none; text-shadow: none; }
+}

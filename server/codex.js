@@ -90,7 +90,8 @@ export async function codexModels(signal) {
         const page = await request('model/list', { includeHidden: false, limit: 50, ...(cursor && { cursor }) });
         for (const entry of page.data) {
           if (!entry.hidden && entry.model && !models.has(entry.model)) {
-            models.set(entry.model, { id: entry.model, label: entry.displayName || entry.model });
+            models.set(entry.model, { id: entry.model, label: entry.displayName || entry.model, isDefault: entry.isDefault === true,
+              efforts: (entry.supportedReasoningEfforts || []).map(item => item.reasoningEffort), defaultEffort: entry.defaultReasoningEffort });
           }
         }
         cursor = page.nextCursor;
@@ -107,7 +108,7 @@ export async function codexModels(signal) {
   }
 }
 
-export function codexGenerate({ model, prompt, signal, onDelta, images = [] }) {
+export function codexGenerate({ model, prompt, signal, onDelta, images = [], effort }) {
   return codexSession(async ({ request, listeners, directory, interrupt }) => {
     const response = await request('thread/start', {
       cwd: directory, ephemeral: true, approvalPolicy: 'never', sandbox: 'read-only',
@@ -133,12 +134,14 @@ export function codexGenerate({ model, prompt, signal, onDelta, images = [] }) {
             onAbort();
             reject(new AppError('论文阅读任务尝试调用外部工具，已停止。', 502, 'codex_unexpected_tool'));
           } else if (event.method === 'turn/completed') {
-            if (data.turn.status === 'completed') resolve({ text: [...messages.values()].at(-1) || '', model: model || response.model || '' });
+            if (data.turn.status === 'completed') resolve({ text: [...messages.values()].at(-1) || '', model: response.model || model || '',
+              ...(!effort && response.reasoningEffort && { effectiveEffort: response.reasoningEffort }) });
             else reject(new AppError('Codex 未完成请求：' + (data.turn.error?.message ?? data.turn.status), 502, 'codex_turn'));
           }
         });
         request('turn/start', {
           threadId, input: [{ type: 'text', text: prompt }, ...images.map(path => ({ type: 'localImage', path }))], approvalPolicy: 'never',
+          ...(effort && { effort }),
         }).then(result => { turnId = result.turn.id; if (signal?.aborted) onAbort(); }, reject);
       });
     } finally {

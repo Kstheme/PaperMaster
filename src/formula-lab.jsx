@@ -6,7 +6,7 @@ import { Markdown } from './markdown.jsx';
 
 const number = value => Array.isArray(value) ? '[' + value.map(number).join(', ') + ']' : Number(value.toFixed(4)).toString();
 const initial = demo => Object.fromEntries(demo.inputs.map(item => [item.id, item.value]));
-const palette = ['#336c5f', '#a65c39', '#4d6293', '#87661b', '#33757b', '#8a5365'];
+const palette = Array.from({ length: 6 }, (_, i) => 'var(--chart-' + (i + 1) + ')');
 
 export function FormulaLab({ demo, jobId, component, onNote }) {
   const [values, setValues] = useState(() => initial(demo));
@@ -108,10 +108,10 @@ function Geometry({ demo, result, onDrag }) {
   return <figure className="geometry">
     <svg ref={svg} viewBox="0 0 292 292" role="img" aria-label="二维演算图，数值也可通过旁边的输入框修改"
       onPointerMove={move} onPointerUp={() => { dragging.current = null; }} onPointerCancel={() => { dragging.current = null; }}>
-      <rect width="292" height="292" fill="#f8f7ef"/>
-      {[-1, -.75, -.5, -.25, 0, .25, .5, .75, 1].map(t => <g key={t} stroke={t === 0 ? '#a8b2a5' : '#e4e5da'}>
+      <rect width="292" height="292" fill="var(--inset)"/>
+      {[-1, -.75, -.5, -.25, 0, .25, .5, .75, 1].map(t => <g key={t} stroke={t === 0 ? 'var(--line-strong)' : 'var(--diagram-grid)'}>
         <path d={`M 22 ${y(t * extent)} H 270 M ${x(t * extent)} 22 V 270`}/></g>)}
-      <g fill="#63716a" fontSize="10">
+      <g fill="var(--muted)" fontSize="10">
         <text x="24" y="285">{-extent}</text><text x="257" y="285">{extent}</text>
         <text x="3" y="22">{extent}</text><text x="3" y="270">{-extent}</text>
       </g>
@@ -132,7 +132,7 @@ function Geometry({ demo, result, onDrag }) {
         return <g key={index} fill={color}>
           <title>{mark.label}</title>
           {segment && <line x1={x(segment[0])} y1={y(segment[1])} x2={x(px)} y2={y(py)} stroke={color} strokeWidth="2.2"/>}
-          {mark.type !== 'segment' && <circle cx={x(px)} cy={y(py)} r={mark.drag ? 6 : 4} stroke="#fcfbf8" strokeWidth="1.6"/>}
+          {mark.type !== 'segment' && <circle cx={x(px)} cy={y(py)} r={mark.drag ? 6 : 4} stroke="var(--inset)" strokeWidth="1.6"/>}
           {mark.label && mark.type !== 'segment' && <text x={x(px) + 8} y={y(py) - 7} fontSize="11">{mark.label}</text>}
           {mark.drag && <circle className="geometry-handle" cx={x(px)} cy={y(py)} r="14" fill="transparent" onPointerDown={event => {
             event.preventDefault();
@@ -176,9 +176,9 @@ function MiniCharts({ demo, values, result }) {
       <span>{item.name}</span><i style={{ width: Math.abs(item.value) / scale * 100 + '%', background: palette[index % palette.length] }}/><output>{number(item.value)}</output>
     </li>)}</ul>}
     {!!path && <svg className="lab-curve" viewBox="0 0 280 120" role="img" aria-label={input.label + '变化时的输出曲线'}>
-      <path d="M12 12 V108 H268" stroke="#a8b2a5" fill="none"/>
-      <path d={path} stroke="#336c5f" strokeWidth="2" fill="none"/>
-      {Number.isFinite(marker?.y) && <circle cx={marker.x} cy={marker.y} r="4" fill="#a65c39"/>}
+      <path d="M12 12 V108 H268" stroke="var(--line-strong)" fill="none"/>
+      <path d={path} stroke="var(--chart-1)" strokeWidth="2" fill="none"/>
+      {Number.isFinite(marker?.y) && <circle cx={marker.x} cy={marker.y} r="4" fill="var(--chart-2)"/>}
     </svg>}
   </>;
 }

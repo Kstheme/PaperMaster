@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const tables = ['papers', 'jobs', 'connections', 'settings'];
+const tables = ['papers', 'jobs', 'connections', 'settings', 'followups', 'repoTraces', 'methodTables', 'methodDrafts', 'deliveries'];
 
 export async function openLibrary(directory) {
   await mkdir(directory, { recursive: true, mode: 0o700 });

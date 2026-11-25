@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
@@ -9,7 +9,6 @@ import { pipeline } from 'node:stream/promises';
 import { create } from 'tar';
 import { openLibrary, writeAtomic } from './library.js';
 import { credentialVault } from './credentials.js';
-import { codexModels } from './codex.js';
 import { AppError, requiredText } from './errors.js';
 import { attachRepository, importPaper, loadPaper, PDF_LIMIT } from './import.js';
 import { createReadingService, modes } from './reading.js';
@@ -18,6 +17,11 @@ import { components, figureChapter, figureKeys } from './reading-figures.js';
 import { solveDemo } from './interaction-math.js';
 import { prepareSource } from './interaction-source.js';
 import { modelServices, providers } from './providers.js';
+import { evidenceMarkdown, markdownText, uuid as idPattern } from './evidence.js';
+import { followupService } from './followups.js';
+import { deliveryMarkdown, methodTables } from './method-tables.js';
+import { traceRepository } from './repository-reading.js';
+import { readingRepositoryBlock } from './draw2think-reading.js';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const contentTypes = {
@@ -25,12 +29,13 @@ const contentTypes = {
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml',
   '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
 };
-const idPattern = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-
-export async function createApp({ directory, port = 0, remoteFetch, vault = credentialVault() }) {
+export async function createApp({ directory, port = 0, remoteFetch, vault = credentialVault(), codex }) {
   const library = await openLibrary(directory);
-  const models = modelServices(library, vault, remoteFetch);
+  const models = modelServices(library, vault, remoteFetch, codex);
   const reader = createReadingService(library, models);
+  const followups = followupService(library, models);
+  const tables = methodTables(library, models, readNote);
+  const shutdown = new AbortController();
   const session = randomBytes(32).toString('hex');
   let mutation = Promise.resolve();
   function serialized(action) {
@@ -54,7 +59,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
         return json(res, { token: session });
       }
       if (req.headers['x-papermaster-session'] !== session) throw new AppError('请刷新页面以恢复本地会话。', 403);
-      await route(req, res, url, { library, reader, models, serialized });
+      await route(req, res, url, { library, reader, models, tables, followups, serialized, signal: shutdown.signal });
     } catch (error) {
       if (res.headersSent || res.destroyed) { if (!res.writableEnded) res.destroy(); return; }
       if (error instanceof AppError) json(res, { error: error.message, code: error.code }, error.status);
@@ -74,6 +79,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
     url: `http://127.0.0.1:${server.address().port}`,
     async close() {
       const closed = new Promise(resolve => server.close(resolve));
+      shutdown.abort();
       await reader.close();
       await closed;
       await mutation;
@@ -82,7 +88,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
   };
 }
 
-async function route(req, res, url, { library, reader, models, serialized }) {
+async function route(req, res, url, { library, reader, models, followups, tables, serialized, signal }) {
   const parts = url.pathname.slice('/api/'.length).split('/');
   const [resource, id, action, member] = parts;
   const method = req.method;
@@ -99,6 +105,31 @@ async function route(req, res, url, { library, reader, models, serialized }) {
         sections: sections.filter(item => item.markdown).map(({ key, title }) => ({ key, title })),
       })),
       providers, modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
+  }
+  if (resource === 'method-tables') {
+    if (!id && method === 'GET') return json(res, tables.list());
+    if (!id && method === 'POST') return json(res, tables.create(await body(req)), 201);
+    if (id && !action && method === 'GET') return json(res, tables.get(id));
+    if (id && action === 'candidates' && method === 'POST') return json(res, await tables.preview(id, await body(req), signal));
+    if (id && action === 'apply' && method === 'POST') return json(res, tables.apply(id, await body(req)));
+    if (id && action === 'rows' && member && method === 'PATCH') return json(res, tables.edit(id, member, await body(req)));
+    if (id && action === 'rows' && member && method === 'DELETE') return json(res, tables.remove(id, member, await body(req)));
+    if (id && action === 'deliveries' && method === 'GET') return json(res, tables.deliveries(tables.get(id).id));
+    if (id && action === 'delivery-preview' && method === 'POST') {
+      const input = await body(req);
+      const table = tables.get(id);
+      return json(res, { topic: table.title, rows: tables.selectedDelivery(table, input) });
+    }
+    if (id && action === 'deliveries' && method === 'POST') return json(res, tables.deliver(id, await body(req)), 201);
+    if (id && member && action === 'download' && method === 'GET') {
+      const snapshot = get('deliveries', member);
+      if (snapshot.tableId !== id) throw new AppError('交付快照不存在。', 404);
+      if (url.searchParams.get('format') === 'markdown') {
+        res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+        return res.end(deliveryMarkdown(snapshot));
+      }
+      return json(res, snapshot);
+    }
   }
   if (resource === 'papers' && method === 'POST' && !id) {
     if (req.headers['content-type']?.startsWith('application/pdf')) {
@@ -155,21 +186,13 @@ async function route(req, res, url, { library, reader, models, serialized }) {
       if (section && !job.sections.some(item => item.key === section && item.markdown)) throw new AppError('找不到可加入笔记的小节。');
       const passage = exportJob(library, job, section, false);
       const marker = `<!-- papermaster:${job.id}:${section || 'all'} -->`;
-      return json(res, await serialized(async () => {
-        const note = await readNote(library, id);
-        if (!note.markdown.includes(marker)) {
-          const contents = note.markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage;
-          if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
-          await writeAtomic(library.path(id, 'note.md'), contents);
-        }
-        return readNote(library, id);
-      }));
+      return json(res, await serialized(() => appendNote(library, id, marker, passage)));
     }
   }
   if (resource === 'connections') {
     if (!id && method === 'POST') return json(res, await models.save(await body(req)), 201);
     if (id === 'codex' && action === 'models' && !member && method === 'GET') {
-      return json(res, { models: await codexModels(AbortSignal.timeout(15_000)) });
+      return json(res, { models: await models.listCodexModels(url.searchParams.has('refresh')) });
     }
     if (id === 'default' && method === 'PUT') {
       const connection = get('connections', (await body(req)).connectionId);
@@ -179,23 +202,66 @@ async function route(req, res, url, { library, reader, models, serialized }) {
       return json(res, await models.check(get('connections', id), AbortSignal.timeout(60_000)));
     }
     if (id && !action && method === 'PATCH') {
-      const { model } = await body(req);
-      return json(res, await serialized(() => {
+      const { model, effort } = await body(req);
+      return json(res, await serialized(async () => {
         const connection = get('connections', id);
         if (connection.provider !== 'codex') throw new AppError('此入口仅用于切换 Codex 模型。');
         const nextModel = model === '' ? '' : requiredText(model, '模型名', 180);
-        return library.put('connections', { ...connection, model: nextModel });
+        const next = { ...connection, model: nextModel };
+        return library.put('connections', { ...next, effort: await models.resolveEffort(next, effort) });
       }));
     }
   }
   if (resource === 'jobs') {
-    if (!id && method === 'POST') return json(res, reader.start(await body(req)), 202);
+    if (!id && method === 'POST') {
+      const input = await body(req);
+      return json(res, await serialized(() => reader.start(input)), 202);
+    }
     if (id) {
       const job = get('jobs', id);
       if (!action && method === 'GET') return json(res, reader.present(job));
+      if (action === 'followups' && !member && method === 'GET') return json(res, followups.list(id));
+      if (action === 'followups' && member && method === 'DELETE') return json(res, followups.remove(id, member));
+      if (action === 'followups' && !member && method === 'POST') {
+        return json(res, await followups.ask(job, await body(req), signal));
+      }
+      if (action === 'followup-note' && member && method === 'POST') {
+        const input = await body(req);
+        if (!idPattern.test(input.saveId || '')) throw new AppError('笔记保存标识无效。');
+        const passage = followups.note(job, member, input);
+        return json(res, await serialized(() => appendNote(library, job.references[0].id,
+          '<!-- papermaster:followup:' + input.saveId + ' -->', passage)));
+      }
+      if (action === 'repo-trace' && !member && method === 'GET') {
+        return json(res, library.all('repoTraces').find(item => item.jobId === id) || null);
+      }
+      if (action === 'repo-trace' && !member && method === 'POST') {
+        if (job.references.length !== 1 || !job.sections.some(section => section.markdown)) throw new AppError('请打开一份单篇论文阅读结果。');
+        const result = await traceRepository({ library, models, job, input: await body(req), signal });
+        signal.throwIfAborted();
+        return json(res, library.put('repoTraces', { ...result, id: randomUUID(), jobId: id }));
+      }
+      if (action === 'repo-note' && member && method === 'POST') {
+        const trace = get('repoTraces', member);
+        const input = await body(req);
+        const step = trace.jobId === id && trace.paths[input.pathIndex]?.steps[input.stepIndex];
+        if (!step) throw new AppError('找不到核实过的仓库步骤。', 404);
+        const observation = input.observation ? requiredText(input.observation, '观察', 6000) : '';
+        const passage = ['### 仓库精读 · ' + markdownText(step.symbol), '论文步骤 · ' + markdownText(trace.focus),
+          '实现 · ' + evidenceMarkdown(step.definition), ...(step.call ? ['调用 · ' + evidenceMarkdown(step.call)] : []),
+          ...(observation ? ['读者观察 · ' + observation] : [])].join('\n\n');
+        return json(res, await serialized(() => appendNote(library, job.references[0].id,
+          '<!-- papermaster:repo:' + trace.id + ':' + input.pathIndex + ':' + input.stepIndex + ' -->', passage)));
+      }
       if (action === 'stop' && method === 'POST') return json(res, reader.stop(id));
-      if (action === 'resume' && method === 'POST') return json(res, reader.retry(id, (await body(req)).connectionId), 202);
-      if (action === 'interactive' && !member && method === 'POST') return json(res, reader.upgrade(id, await body(req)), 202);
+      if (action === 'resume' && method === 'POST') {
+        const input = await body(req);
+        return json(res, await serialized(() => reader.retry(id, input.connectionId, input.effort)), 202);
+      }
+      if (action === 'interactive' && !member && method === 'POST') {
+        const input = await body(req);
+        return json(res, await serialized(() => reader.upgrade(id, input)), 202);
+      }
       if (action === 'component' && member && method === 'POST') return json(res, reader.retryComponent(id, member), 202);
       if (action === 'asset' && member && method === 'GET') {
         const source = job.interaction?.sources?.find(item => item.id === member);
@@ -232,7 +298,10 @@ async function route(req, res, url, { library, reader, models, serialized }) {
         }));
       }
       if (action === 'exercise' && method === 'GET') return json(res, reader.nextExercise(id));
-      if (action === 'answer' && method === 'POST') return json(res, reader.answer(id, await body(req)), 202);
+      if (action === 'answer' && method === 'POST') {
+        const input = await body(req);
+        return json(res, await serialized(() => reader.answer(id, input)), 202);
+      }
       if (action === 'skip' && method === 'POST') return json(res, reader.skip(id, (await body(req)).questionId));
       if (action === 'note' && method === 'GET' && job.status === 'completed') {
         return json(res, { markdown: exportJob(library, job) });
@@ -298,6 +367,16 @@ async function readNote(library, id) {
   return { markdown, revision: createHash('sha256').update(markdown).digest('hex') };
 }
 
+async function appendNote(library, id, marker, passage) {
+  const note = await readNote(library, id);
+  if (!note.markdown.includes(marker)) {
+    const contents = note.markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage;
+    if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
+    await writeAtomic(library.path(id, 'note.md'), contents);
+  }
+  return readNote(library, id);
+}
+
 function exportJob(library, job, key, title = true) {
   const papers = job.references.map(ref => {
     const paper = library.get('papers', ref.id);
@@ -329,10 +408,23 @@ function exportJob(library, job, key, title = true) {
   for (const section of job.sections.filter(item => item.markdown && (!key || key === item.key))) {
     const takeaways = section.takeaways?.map(item => '- ' + item.replace(/\s*\n\s*/g, ' ')).join('\n');
     const keys = figureKeys(job).filter(name => figureChapter(job.mode, name) === section.key);
+    if (section.repository) keys.push(section.repository.key);
     const body = readingFigureParts(splitReadingMarkdown(section.markdown, false).before, keys)
-      .flatMap(part => part.key ? describeFigure(part.key) : [part.markdown]);
+      .flatMap(part => {
+        const block = readingRepositoryBlock(section, papers[0].paper, papers[0].version, repo);
+        if (part.key && part.key === block?.key) {
+          const guide = block.walkthrough ?? block.graph;
+          return ['#### ' + (guide?.title || block.title), guide?.sample, block.markdown, ...(guide?.nodes || []).map(node =>
+            '- **' + markdownText(node.title) + '** · ' + [node.concept, node.operation, node.mapping]
+              .filter(Boolean).map(markdownText).join('。') + ' ' + node.evidence.map(evidenceMarkdown).join('、')),
+            guide?.reuse && '可复用做法 · ' + guide.reuse];
+        }
+        return part.key ? describeFigure(part.key) : [part.markdown];
+      });
     parts.push(`### ${section.title}`, ...[section.summary, takeaways, ...body]
       .filter(Boolean), ...(section.model ? [`模型：${section.model}`] : []));
+    if (section.evidence?.length) parts.push('本章证据\n\n' + section.evidence.map(source => '- ' + evidenceMarkdown(source)).join('\n'));
+    if (section.searched) parts.push('已查阅文件：' + section.searched.map(markdownText).join('、'));
   }
   if (!key && job.mode === 'guided') {
     const items = job.sections.find(item => item.key === 'questions')?.questions || [];

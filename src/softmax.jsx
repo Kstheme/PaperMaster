@@ -28,18 +28,21 @@ export default function Softmax() {
     return () => { observer.disconnect(); instance.dispose(); };
   }, []);
   useEffect(() => {
+    const theme = getComputedStyle(host.current);
+    const color = token => theme.getPropertyValue(token).trim();
     chart.current.setOption({
       animationDuration: 0,
       animationDurationUpdate: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140,
       grid: { left: 64, right: 55, top: 3, bottom: 23 },
-      tooltip: { trigger: 'axis', confine: true, valueFormatter: item => Number(item).toFixed(3) },
+      tooltip: { trigger: 'axis', confine: true, backgroundColor: color('--surface'), borderColor: color('--line'),
+        textStyle: { color: color('--text') }, valueFormatter: item => Number(item).toFixed(3) },
       xAxis: { type: 'value', min: 0, max: 1, interval: .25,
-        splitLine: { lineStyle: { color: '#ccd8ce', type: 'dashed' } },
-        axisLabel: { color: '#4b6056', formatter: item => (item * 100) + '%' } },
-      yAxis: { type: 'category', inverse: true, data: ['候选 A', '候选 B', '候选 C'], axisLabel: { color: '#4b6056' } },
+        splitLine: { lineStyle: { color: color('--line'), type: 'dashed' } },
+        axisLabel: { color: color('--muted'), formatter: item => (item * 100) + '%' } },
+      yAxis: { type: 'category', inverse: true, data: ['候选 A', '候选 B', '候选 C'], axisLabel: { color: color('--muted') } },
       series: [{ name: '当前权重', type: 'bar', barMaxWidth: 14,
-        data: weight.map((item, index) => ({ value: item, itemStyle: { color: index === 0 ? '#286259' : '#719682', borderRadius: [0, 3, 3, 0] } })),
-        label: { show: true, position: 'right', color: '#263b31', formatter: ({ value }) => value.toFixed(3) } }],
+        data: weight.map((item, index) => ({ value: item, itemStyle: { color: color(index === 0 ? '--accent' : '--chart-3'), borderRadius: [0, 3, 3, 0] } })),
+        label: { show: true, position: 'right', color: color('--text'), formatter: ({ value }) => value.toFixed(3) } }],
     });
   }, [value]);
   return <section className="visual">

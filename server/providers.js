@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { AppError, requiredText } from './errors.js';
-import { codexGenerate, codexStatus } from './codex.js';
+import { codexGenerate, codexModels, codexStatus } from './codex.js';
 
 export const providers = {
   codex: { label: 'Codex 订阅' },
@@ -11,7 +11,32 @@ export const providers = {
   gemini: { label: 'Gemini 原生 API', api: 'https://generativelanguage.googleapis.com/v1beta', env: 'GEMINI_API_KEY' },
 };
 
-export function modelServices(library, vault, remoteFetch = fetch) {
+export function modelServices(library, vault, remoteFetch = fetch, codex = { generate: codexGenerate, models: codexModels, status: codexStatus }) {
+  let catalog;
+  let loadedAt = 0;
+  let loading;
+  async function listCodexModels(refresh = false) {
+    if (!refresh && catalog && Date.now() - loadedAt < 60_000) return catalog;
+    loading ??= Promise.resolve().then(() => codex.models(AbortSignal.timeout(25_000))).then(result => {
+      catalog = result;
+      loadedAt = Date.now();
+      return result;
+    }).finally(() => { loading = undefined; });
+    return loading;
+  }
+
+  async function resolveEffort(connection, selected) {
+    const effort = selected === undefined || selected === 'connection' ? connection.effort || 'default' : selected;
+    if (connection.provider !== 'codex') {
+      if (effort !== 'default') throw new AppError('此模型连接没有可选择的思考强度。', 422, 'unsupported_effort');
+      return undefined;
+    }
+    if (effort === 'default') return effort;
+    const models = await listCodexModels();
+    const model = connection.model ? models.find(item => item.id === connection.model) : models.find(item => item.isDefault);
+    if (!model?.efforts?.includes(effort)) throw new AppError('所选模型不支持此思考强度。请重新选档或沿用模型默认。', 422, 'unsupported_effort');
+    return effort;
+  }
   async function save(input) {
     const provider = requiredText(input.provider, '服务商', 40);
     if (!Object.hasOwn(providers, provider)) throw new AppError('未知的模型服务商。');
@@ -42,15 +67,21 @@ export function modelServices(library, vault, remoteFetch = fetch) {
         credential = env;
       }
     }
-    const connection = library.put('connections', { id, provider, label, model, base, credential });
+    const entry = { id, provider, label, model, base, credential };
+    const effort = provider === 'codex' ? await resolveEffort(entry, input.effort) : undefined;
+    const connection = library.put('connections', { ...entry, effort });
     if (!library.get('settings', 'default')) library.put('settings', { id: 'default', connectionId: id });
     return connection;
   }
 
-  async function generate(connection, prompt, { signal, onDelta, maxTokens = 3000, images = [] } = {}) {
+  async function generate(connection, prompt, { signal, onDelta, maxTokens = 3000, images = [], effort = connection.effort } = {}) {
     const timeout = AbortSignal.timeout(240_000);
     signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-    if (connection.provider === 'codex') return codexGenerate({ model: connection.model, prompt, signal, onDelta, images });
+    if (connection.provider === 'codex') {
+      const result = await codex.generate({ model: connection.model, prompt, signal, onDelta, images,
+        effort: effort === 'default' ? undefined : effort });
+      return { ...result, ...(effort && { effort }) };
+    }
     const key = connection.credential === 'vault' ? await vault.get(connection.id) : process.env[connection.credential];
     if (!key) throw new AppError('此连接找不到 API Key。请检查本机凭证或环境变量。', 424, 'missing_key');
     const png = await Promise.all(images.map(path => readFile(path).then(contents => contents.toString('base64'))));
@@ -94,9 +125,9 @@ export function modelServices(library, vault, remoteFetch = fetch) {
   }
 
   return {
-    save, generate,
+    save, generate, resolveEffort, listCodexModels,
     async check(connection, signal) {
-      if (connection.provider === 'codex') return codexStatus(AbortSignal.timeout(25_000));
+      if (connection.provider === 'codex') return codex.status(AbortSignal.timeout(25_000));
       const result = await generate(connection, 'Reply with exactly: OK', { signal, maxTokens: 256 });
       return { model: result.model, mode: 'api' };
     },
