@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="PaperMaster is a local research workspace. Read papers, trace the implementation, and save evidence-backed notes.">
+  <title>PaperMaster — From paper to implementation</title>
+  <style>
+    :root{--ink:#1c251d;--muted:#535f51;--paper:#f4f3ea;--white:#fffdf7;--line:#d2d8ca;--forest:#17271e;--forest-2:#22362a;--light:#edf3e8;--dim:#b3c4b3;--lime:#d7efaa;--amber:#ffd38a;--serif:"Palatino Linotype","Book Antiqua",Palatino,"Songti SC",SimSun,serif;--sans:"Aptos","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;--mono:"Cascadia Mono",Consolas,monospace}
+    *,*::before,*::after{box-sizing:border-box}
+    body{margin:0;color:var(--ink);font:16px/1.6 var(--sans)}
+    h1,h2,h3,p,figure{margin:0}
+    a{color:inherit;text-underline-offset:.22em}
+    button,input{font:inherit}
+    button{cursor:pointer}
+    :focus-visible{outline:3px solid #517c39;outline-offset:4px}
+    .dark :focus-visible{outline-color:var(--lime)}
+    .skip{position:absolute;left:12px;top:8px;z-index:2;transform:translateY(-150%);background:var(--white);padding:8px 12px}
+    .skip:focus{transform:none}
+    .wrap{width:min(calc(100% - 2 * clamp(18px,5.4vw,84px)),1240px);margin-inline:auto}
+    .paper-band{background:var(--paper)}
+    .bar{display:flex;align-items:center;justify-content:space-between;gap:8px 24px;min-height:72px;border-bottom:1px solid var(--line)}
+    .brand{min-height:44px;display:inline-flex;gap:10px;align-items:center;text-decoration:none;font:700 23px/1 var(--serif);letter-spacing:-.035em}
+    .brand svg{width:32px;height:32px;flex:none}
+    .bar nav,.actions,.presets,.evidence{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+    .bar nav a,.lang{display:inline-flex;min-height:44px;align-items:center;font-size:14px;font-weight:650;text-decoration:none}
+    .bar nav a:hover{text-decoration:underline}
+    .lang{padding:0 12px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--ink)}
+    .hero{padding-block:clamp(38px,7.1vw,104px) clamp(34px,5vw,72px);display:grid;grid-template-columns:minmax(0,1.04fr) minmax(0,1fr);align-items:center;gap:clamp(26px,5vw,68px)}
+    .eyebrow{color:#3c5b3f;font:650 .74rem/1.5 var(--mono);letter-spacing:.075em;text-transform:uppercase}
+    h1,h2{font-family:var(--serif);font-weight:600;text-wrap:balance}
+    h1{margin:16px 0 20px;font-size:clamp(2.8rem,6.25vw,6rem);line-height:.99;letter-spacing:-.075em}
+    h1 em{font-weight:500;color:#426044}
+    .hero p:not(.eyebrow){max-width:43ch;color:var(--muted);font-size:clamp(1rem,1.45vw,1.14rem)}
+    .hero .actions{margin-top:24px}
+    .button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:8px 15px;border:1px solid #a6b39f;border-radius:6px;font-size:.9rem;font-weight:720;text-decoration:none;color:var(--ink);background:var(--white);transition:background .16s,border-color .16s}
+    .button:hover{background:#e9efdf;border-color:#637f5e}
+    .button.primary{background:var(--forest);color:var(--white);border-color:var(--forest)}
+    .button.primary:hover{background:#304e37}
+    .hero-figure{min-width:0;padding:14px;border-radius:15px;border:1px solid #415744;background:var(--forest);color:var(--light);box-shadow:0 18px 36px #263a2530}
+    .figure-title{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:4px 6px 12px;font:600 .72rem/1.4 var(--mono);letter-spacing:.04em}
+    .figure-title span:last-child{color:var(--dim)}
+    .network{width:100%;height:auto;display:block;border-radius:8px;background:#1b2d22}
+    .wire{fill:none;stroke:#55775c;stroke-width:1.4}
+    .current-wire{fill:none;stroke:var(--lime);stroke-width:1.8;stroke-dasharray:4 11;animation:flow 1.9s linear infinite;animation-play-state:paused}
+    .motion-on .current-wire{animation-play-state:running}
+    .network text{font-family:var(--mono);fill:var(--light);font-size:14px}
+    .network .small{fill:#bdd1be;font-size:11px}
+    .network .node{fill:#243c2b;stroke:#698768}
+    .network .paper-sheet{fill:#e8ead7;stroke:#b8c9a9}
+    .network .ink-line{stroke:#748b6f;fill:none}
+    .network .accent-line{stroke:var(--lime);fill:none}
+    .figure-actions{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 6px 0;color:var(--dim);font-size:.78rem}
+    .figure-actions button{min-height:44px;border:0;background:transparent;color:var(--light);text-decoration:underline;text-underline-offset:.25em;padding:4px}
+    .figure-actions button[hidden]{display:none}
+    .index-band{border-block:1px solid var(--line);background:#e8eddf}
+    .index{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+    .index article{padding:22px clamp(14px,2.4vw,32px);min-width:0}
+    .index article:first-child{padding-left:0}
+    .index article + article{border-left:1px solid #c7d2c0}
+    .index h2{font:700 1rem/1.3 var(--sans);letter-spacing:0}
+    .index p{margin-top:5px;color:#485947;font-size:.91rem;max-width:32ch}
+    .walkthrough,.workspace,.install{padding-block:clamp(38px,6vw,82px)}
+    .section-title{font-size:clamp(2.2rem,4.5vw,4.15rem);line-height:1.05;letter-spacing:-.061em;margin:10px 0 12px}
+    .section-description{max-width:62ch;color:var(--muted)}
+    .demo{margin-top:24px;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);border:1px solid #48604c;border-radius:14px;background:var(--forest);color:var(--light)}
+    .demo-visual,.demo-readout{min-width:0;padding:clamp(16px,3vw,30px)}
+    .demo-visual{border-right:1px solid #48604c}
+    .geometry{display:block;width:100%;max-height:300px;border:1px solid #45604a;border-radius:8px;background:radial-gradient(ellipse at 48% 55%,#2f4931,#1b3023 75%)}
+    .geometry text{fill:var(--light);font:13px var(--mono)}
+    .geometry .point{fill:var(--lime)}
+    .geometry .arc{stroke:var(--amber);fill:none;stroke-width:2.4;stroke-linecap:round}
+    .range-label{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 12px;margin-top:12px;font-size:.9rem;color:var(--dim)}
+    .range-label output{color:var(--light);font:600 .9rem var(--mono)}
+    .demo input[type=range]{width:100%;min-height:44px;margin:0;accent-color:var(--lime)}
+    .demo input:disabled{opacity:.55}
+    .presets{gap:8px}
+    .presets button{min-height:44px;border:1px solid #6b866b;border-radius:5px;background:transparent;color:var(--light);padding:5px 10px;font-size:.86rem}
+    .presets button[aria-pressed=true]{background:var(--lime);color:#20301e;border-color:var(--lime);font-weight:700}
+    .demo-readout .eyebrow{color:var(--dim)}
+    .reading-value{display:block;color:var(--amber);font:600 clamp(2.8rem,7vw,5.65rem)/1.12 var(--serif);margin:4px 0 12px;min-height:1.12em}
+    .demo-readout h3{font-size:1.05rem;margin-top:14px}
+    .demo-readout p:not(.eyebrow){color:var(--dim);margin-top:6px}
+    .demo pre{margin:16px 0 5px;padding:12px 14px;background:#101e16;border:1px solid #45604a;border-radius:7px;color:var(--lime);font: .86rem/1.55 var(--mono);overflow:auto}
+    .evidence{padding-top:10px;gap:4px 16px}
+    .evidence a{display:inline-flex;align-items:center;min-height:44px;color:var(--lime);font-size:.86rem}
+    .workspace{background:#e8eddf;border-block:1px solid var(--line)}
+    .workspace-layout{display:grid;align-items:center;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:clamp(24px,5vw,66px)}
+    .workspace ul{padding-left:20px;margin:16px 0 0;color:#374837}
+    .workspace li+li{margin-top:8px}
+    .workspace figure{min-width:0}
+    .workspace img{width:100%;height:auto;display:block;border-radius:10px;border:1px solid #a1b29d}
+    .workspace figcaption{color:var(--muted);font-size:.8rem;margin-top:8px}
+    .install-layout{display:grid;align-items:center;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
+    .terminal{position:relative;background:#1c2b21;border:1px solid #51634e;border-radius:8px;padding:14px 16px;color:var(--light)}
+    .terminal pre{margin:10px 0;font:clamp(.75rem,1.5vw,.92rem)/1.8 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+    .terminal button{min-height:44px;border:1px solid #718570;background:transparent;color:var(--lime);border-radius:6px;padding:0 12px}
+    .terminal p{color:var(--dim);font-size:.82rem;min-height:1.35em;margin-top:5px}
+    .footer{border-top:1px solid var(--line);padding:16px 0;background:var(--paper)}
+    .footer .wrap{display:flex;align-items:center;justify-content:space-between;gap:8px 24px;flex-wrap:wrap}
+    .footer a{display:inline-flex;align-items:center;min-height:44px}
+    @keyframes flow{to{stroke-dashoffset:-30px}}
+    @keyframes settle{from{opacity:.73;transform:translateY(6px)}to{opacity:1;transform:none}}
+    @media (prefers-reduced-motion:no-preference){.hero-copy{animation:settle .42s ease-out}.hero-figure{animation:settle .5s .06s both ease-out}}
+    @media (prefers-reduced-motion:reduce){.current-wire{animation:none}.button{transition:none}}
+    @media (max-width:850px){.workspace-layout,.install-layout{grid-template-columns:1fr}.workspace img{max-width:760px}}
+    @media (max-width:700px){.hero{grid-template-columns:1fr}.hero h1{font-size:clamp(2.8rem,9vw,5.2rem)}.hero-figure{max-width:680px}}
+    @media (max-width:610px){.bar{padding:8px 0;align-items:start}.bar nav{column-gap:12px}.bar nav a{font-size:.83rem}.bar .brand{font-size:20px}.index{grid-template-columns:1fr}.index article,.index article:first-child{padding:12px 0}.index article+article{border-left:0;border-top:1px solid #c7d2c0}.demo{grid-template-columns:1fr}.demo-visual{border-right:0;border-bottom:1px solid #48604c}}
+    @media (max-width:380px){.bar{flex-wrap:wrap}.bar nav{width:100%;justify-content:space-between}.presets{gap:6px}.presets button{padding-inline:8px}}
+    :lang(zh-CN) h1{letter-spacing:-.025em;font-size:clamp(2.6rem,5.8vw,5rem)}
+    :lang(zh-CN) h1 em{font-style:normal}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main" data-zh="跳到正文">Skip to content</a>
+  <header class="paper-band">
+    <div class="bar wrap">
+      <a class="brand" href="./" aria-label="PaperMaster">
+        <svg aria-hidden="true" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#263d2d"/><path d="M16 23c-3-2-6-2.5-9-2V9c3-.5 6 0 9 2 3-2 6-2.5 9-2v12c-3-.5-6 0-9 2V11" fill="none" stroke="#d7efaa" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        PaperMaster
+      </a>
+      <nav aria-label="Project navigation">
+        <a href="#tour" data-zh="交互演示">Walkthrough</a>
+        <a href="#install" data-zh="安装">Install</a>
+        <a href="https://github.com/Kstheme/PaperMaster">GitHub ↗</a>
+        <button class="lang" type="button" lang="zh-CN">中文</button>
+      </nav>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <section class="paper-band">
+      <div class="hero wrap">
+        <div class="hero-copy">
+          <p class="eyebrow" data-zh="本地科研阅读工作台">Local research workspace</p>
+          <h1><span data-zh="读懂论文。">Read the paper.</span><br><em data-zh="追到实现。">Follow the code.</em></h1>
+          <p data-zh="用交互图读懂方法，沿固定提交追踪实现，把有出处的发现存进自己的笔记。">Explore a method, trace its implementation at a pinned commit, and keep source-linked notes in one workspace.</p>
+          <div class="actions"><a class="button primary" href="#tour" data-zh="体验交互演示 →">Try the walkthrough →</a><a class="button" href="#install" data-zh="安装 PaperMaster">Install PaperMaster</a></div>
+        </div>
+        <figure class="hero-figure dark" id="reading-figure">
+          <div class="figure-title"><span data-zh="阅读链路">READING PATH</span><span data-zh="论文 × 源码 × 笔记">PAPER × CODE × NOTES</span></div>
+          <svg class="network" viewBox="0 0 560 365" role="img" aria-labelledby="network-title network-description">
+            <title id="network-title" data-zh="PaperMaster 阅读链路">The PaperMaster reading path</title>
+            <desc id="network-description" data-zh="论文和固定提交的源码汇入交互精读，读者可以把发现和证据存入笔记。">A paper and a pinned repository lead into a walkthrough, then to an evidence-linked note.</desc>
+            <defs>
+              <pattern id="dots" width="15" height="15" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="#426048"/></pattern>
+              <radialGradient id="field"><stop stop-color="#426749"/><stop offset="1" stop-color="#1b2d22"/></radialGradient>
+            </defs>
+            <rect width="560" height="365" fill="url(#field)"/><rect width="560" height="365" fill="url(#dots)" opacity=".62"/>
+            <path class="wire" d="M147 94h45q27 0 27 25v39m-72 112h45q27 0 27-25v-44m126-21h62"/>
+            <path class="current-wire" d="M147 94h45q27 0 27 25v39m-72 112h45q27 0 27-25v-44m126-21h62"/>
+            <g transform="translate(28 35)">
+              <rect class="node" width="120" height="118" rx="9"/>
+              <path class="paper-sheet" d="M32 16h42l12 12v49H32z"/>
+              <path class="ink-line" d="M74 16v13h12M42 40h34m-34 8h25m-25 8h30m-30 8h18" stroke-width="1.8"/>
+              <text x="60" y="101" text-anchor="middle" data-zh="论文">Paper</text>
+            </g>
+            <g transform="translate(28 212)">
+              <rect class="node" width="120" height="116" rx="9"/>
+              <path class="accent-line" d="M48 26 34 39l14 13m24-26 14 13-14 13M65 23 54 55" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <text x="60" y="83" text-anchor="middle" data-zh="仓库">Repository</text><text x="60" y="100" class="small" text-anchor="middle" data-zh="固定提交">pinned commit</text>
+            </g>
+            <g transform="translate(218 103)">
+              <rect width="128" height="153" rx="11" fill="#304c35" stroke="#d7efaa"/>
+              <path d="M32 81 63 40l34 41Z" stroke="#d7efaa" fill="#254231" stroke-width="1.8" stroke-linejoin="round"/>
+              <path d="M46 81a14 14 0 0 0-6-11" stroke="#ffd38a" fill="none" stroke-width="1.8"/>
+              <circle cx="32" cy="81" r="3" fill="#d7efaa"/><circle cx="63" cy="40" r="3" fill="#d7efaa"/><circle cx="97" cy="81" r="3" fill="#d7efaa"/>
+              <text x="64" y="113" text-anchor="middle" data-zh="精读工作台">Walkthrough</text><text x="64" y="132" class="small" text-anchor="middle" data-zh="交互与核对">try &amp; verify</text>
+            </g>
+            <g transform="translate(408 120)">
+              <rect class="node" width="124" height="119" rx="9"/>
+              <path class="paper-sheet" d="M36 17h52v62H36z"/>
+              <path class="ink-line" d="M45 33h34m-34 9h26m-26 9h32m-32 9h18" stroke-width="1.8"/>
+              <path d="M64 67l5 5 13-13" fill="none" stroke="#3e6640" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+              <text x="62" y="102" text-anchor="middle" data-zh="有出处的笔记">Sourced note</text>
+            </g>
+          </svg>
+          <figcaption class="figure-actions"><span data-zh="从原始材料到可回查的发现。">From source material to a traceable finding.</span><button id="motion" type="button" hidden>Play animation</button></figcaption>
+        </figure>
+      </div>
+    </section>
+    <section class="index-band" aria-label="Reading workflow">
+      <div class="index wrap">
+        <article><h2 data-zh="理解方法">Understand the method</h2><p data-zh="逐步查看架构、公式与实验对照。">Step through architecture, equations, and reported results.</p></article>
+        <article><h2 data-zh="追踪实现">Trace the implementation</h2><p data-zh="用代表性样本核对固定提交的源码。">Follow a representative sample through pinned source code.</p></article>
+        <article><h2 data-zh="保留证据">Keep the evidence</h2><p data-zh="把追问摘录和主题方法表保存为可回查的成果。">Save follow-ups and methods with a path back to the source.</p></article>
+      </div>
+    </section>
+    <section class="walkthrough paper-band" id="tour">
+      <div class="wrap">
+        <p class="eyebrow" data-zh="Draw2Think · 仓库精读示例">Draw2Think · repository walkthrough</p>
+        <h2 class="section-title" data-zh="沿着一次量角读懂实现。">Follow a single angle.</h2>
+        <p class="section-description" data-zh="拖动角度或选择场景，看同一次几何调用怎样从论文中的观测变成源码返回值。数值为教学模拟。">Move the angle or choose a case to connect a paper observation to the value returned by the code. The values below are a teaching simulation.</p>
+        <div class="demo dark">
+          <div class="demo-visual">
+            <svg class="geometry" viewBox="0 0 360 230" role="img" aria-labelledby="angle-title angle-description">
+              <title id="angle-title" data-zh="以 B 为顶点的交互角度">Interactive angle at B</title>
+              <desc id="angle-description" data-zh="下方滑块调整射线 BC。金色弧线标记返回的内角。">The slider below rotates ray BC. The gold arc marks the interior angle.</desc>
+              <defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0v20" fill="none" stroke="#506b51" stroke-width=".65"/></pattern></defs>
+              <rect width="360" height="230" fill="url(#grid)" opacity=".58"/>
+              <circle cx="170" cy="112" r="85" fill="none" stroke="#789573" stroke-dasharray="3 6"/>
+              <path d="M170 112H255M170 112L192 194" id="rays" fill="none" stroke="#d7efaa" stroke-width="2.6" stroke-linecap="round"/>
+              <path class="arc" id="angle-arc" d="M210 112A40 40 0 0 1 180.35 150.64"/>
+              <circle class="point" cx="170" cy="112" r="4"/><circle class="point" cx="255" cy="112" r="4"/>
+              <circle class="point" id="point-c" cx="192" cy="194" r="4"/>
+              <text x="266" y="108">A</text><text x="151" y="132">B</text><text id="label-c" x="203" y="190">C</text>
+            </svg>
+            <label for="angle" class="range-label"><span data-zh="旋转射线 BC">Rotate ray BC</span><output id="raw-value" for="angle">285°</output></label>
+            <input id="angle" type="range" min="1" max="359" value="285">
+            <div class="presets" role="group" aria-label="Angle cases">
+              <button type="button" data-case="regular" aria-pressed="false" data-zh="常规角">Regular</button>
+              <button type="button" data-case="reflex" aria-pressed="true" data-zh="反角">Reflex</button>
+              <button type="button" data-case="empty" aria-pressed="false" data-zh="无读数">No reading</button>
+            </div>
+          </div>
+          <div class="demo-readout">
+            <p class="eyebrow" data-zh="工具返回值">Returned by the tool</p>
+            <output class="reading-value" id="result" for="angle">75°</output>
+            <pre id="payload">{ "success": true, "value": 75 }</pre>
+            <h3 id="case-title">Why 285° becomes 75°</h3>
+            <p id="case-detail">The command swaps the endpoints and subtracts the reflex angle from 360° before returning the interior angle.</p>
+            <div class="evidence">
+              <a href="https://arxiv.org/pdf/2605.20743v1#page=4" data-zh="论文章节 ↗">Paper · §3 ↗</a>
+              <a href="https://github.com/draw2think/harness-geometry/blob/1941cd7db0c6b80773e9f207c7b4d965e99f394a/symbolic/tools/geogebra_tools.py#L1283-L1303" data-zh="固定提交的源码 ↗">Pinned source ↗</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="workspace" id="workspace">
+      <div class="workspace-layout wrap">
+        <div>
+          <h2 class="section-title" data-zh="把发现留在手边。">Keep what you find.</h2>
+          <p class="section-description" data-zh="PaperMaster 在本地保存论文、阅读记录和笔记。生成时使用你选择的模型连接。">PaperMaster stores papers, reading history, and notes locally. Generation uses the model connection you choose.</p>
+          <ul><li data-zh="从正文或实现步骤发起追问。">Ask a follow-up from a passage or implementation step.</li><li data-zh="保存主笔记，或导出带来源的 Markdown 与方法表。">Keep a main note or export source-linked Markdown and method tables.</li></ul>
+        </div>
+        <figure>
+          <img src="./images/repository-workbench.webp" width="1393" height="937" loading="lazy" alt="PaperMaster showing the Draw2Think geometry exercise next to the implementation and source links" data-alt-zh="PaperMaster 工作台展示 Draw2Think 几何示例、实现解释与证据链接">
+          <figcaption data-zh="PaperMaster 中实际的 Draw2Think 仓库精读。">Draw2Think repository reading in PaperMaster.</figcaption>
+        </figure>
+      </div>
+    </section>
+    <section class="install paper-band" id="install">
+      <div class="install-layout wrap">
+        <div><h2 class="section-title" data-zh="开始阅读。">Start reading.</h2><p class="section-description" data-zh="需要 Node.js 22.16 或更新版本。关联公开 GitHub 仓库需要 Git。">Requires Node.js 22.16 or later. Repository reading also requires Git.</p></div>
+        <div class="terminal dark">
+          <pre id="commands">npm install -g papermaster-reader@latest
+papermaster</pre>
+          <button type="button" id="copy" data-zh="复制命令">Copy commands</button>
+          <p role="status" id="copy-status"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="footer"><div class="wrap"><strong>PaperMaster</strong><div class="actions"><a id="readme" href="https://github.com/Kstheme/PaperMaster#readme" data-zh="中文使用文档">Documentation</a><a href="https://github.com/Kstheme/PaperMaster/releases" data-zh="版本发布">Releases</a><a href="https://github.com/Kstheme/PaperMaster/issues" data-zh="反馈问题">Issues</a></div></div></footer>
+  <script>
+    const language = document.querySelector('.lang');
+    const translated = [...document.querySelectorAll('[data-zh]')].map(element => ({ element, en: element.textContent }));
+    const screenshot = document.querySelector('[data-alt-zh]');
+    const screenshotAlt = screenshot.alt;
+    const motion = document.querySelector('#motion');
+    const figure = document.querySelector('#reading-figure');
+    const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    const slider = document.querySelector('#angle');
+    const presets = [...document.querySelectorAll('[data-case]')];
+    const arc = document.querySelector('#angle-arc');
+    const point = document.querySelector('#point-c');
+    const label = document.querySelector('#label-c');
+    const status = document.querySelector('#copy-status');
+    let locale = 'en';
+    let running = false;
+    let empty = false;
+    const message = (en, zh) => locale === 'zh-CN' ? zh : en;
+
+    function draw() {
+      const angle = Number(slider.value);
+      const radians = angle * Math.PI / 180;
+      const x = 170 + 85 * Math.cos(radians);
+      const y = 112 - 85 * Math.sin(radians);
+      const value = empty ? null : Math.min(angle, 360 - angle);
+      const selected = empty ? 'empty' : angle > 180 ? 'reflex' : 'regular';
+      document.querySelector('#rays').setAttribute('d', 'M170 112H255M170 112L' + x + ' ' + y);
+      point.setAttribute('cx', x);
+      point.setAttribute('cy', y);
+      label.setAttribute('x', x + (x < 170 ? -16 : 10));
+      label.setAttribute('y', y - 7);
+      arc.style.display = empty ? 'none' : '';
+      arc.setAttribute('d', 'M210 112A40 40 0 0 ' + Number(angle > 180) + ' ' +
+        (170 + 40 * Math.cos(radians)) + ' ' + (112 - 40 * Math.sin(radians)));
+      slider.disabled = empty;
+      slider.setAttribute('aria-valuetext', angle + '°');
+      presets.forEach(button => button.setAttribute('aria-pressed', button.dataset.case === selected));
+      document.querySelector('#raw-value').value = empty ? '—' : angle + '°';
+      document.querySelector('#result').value = empty ? 'null' : value + '°';
+      document.querySelector('#payload').textContent = '{ "success": true, "value": ' + value + ' }';
+      const cases = {
+        regular: [message('A regular angle', '常规角度'), message('The measured angle is already within 180°. The code converts radians to degrees and returns the result.', '测得的角度不超过 180°。代码把弧度换成角度并返回。')],
+        reflex: [message('Why ' + angle + '° becomes ' + value + '°', '为什么 ' + angle + '° 会变成 ' + value + '°'), message('The code subtracts the reflex angle from 360° and swaps the endpoints for the redrawn arc.', '代码用 360° 减去反角，并交换端点重新画弧。')],
+        empty: [message('A successful call with no value', '调用成功，读数为空'), message('The command can succeed even if the engine returns no measurement. The result carries a null value.', '即使引擎未能读取数值，命令也可能成功。此时返回值为 null。')],
+      };
+      [document.querySelector('#case-title').textContent, document.querySelector('#case-detail').textContent] = cases[selected];
+    }
+
+    function setMotion(value) {
+      running = value && !motionPreference.matches;
+      motion.hidden = motionPreference.matches;
+      figure.classList.toggle('motion-on', running);
+      motion.textContent = running ? message('Pause animation', '暂停动画') : message('Play animation', '播放动画');
+    }
+
+    function setLanguage(value) {
+      locale = value;
+      document.documentElement.lang = value;
+      translated.forEach(({ element, en }) => { element.textContent = message(en, element.dataset.zh); });
+      screenshot.alt = message(screenshotAlt, screenshot.dataset.altZh);
+      language.textContent = message('中文', 'English');
+      language.lang = message('zh-CN', 'en');
+      document.querySelector('#readme').href = message('https://github.com/Kstheme/PaperMaster#readme',
+        'https://github.com/Kstheme/PaperMaster/blob/main/README.zh-CN.md');
+      document.querySelector('nav').setAttribute('aria-label', message('Project navigation', '项目导航'));
+      document.querySelector('.index-band').setAttribute('aria-label', message('Reading workflow', '阅读流程'));
+      document.querySelector('.presets').setAttribute('aria-label', message('Angle cases', '角度场景'));
+      document.title = message('PaperMaster — From paper to implementation', 'PaperMaster · 从论文到实现');
+      status.textContent = '';
+      setMotion(running);
+      draw();
+    }
+
+    presets.forEach(button => button.addEventListener('click', () => {
+      empty = button.dataset.case === 'empty';
+      if (!empty) slider.value = button.dataset.case === 'reflex' ? 285 : 75;
+      draw();
+    }));
+    slider.addEventListener('input', draw);
+    motion.addEventListener('click', () => setMotion(!running));
+    motionPreference.addEventListener('change', () => setMotion(false));
+    language.addEventListener('click', () => setLanguage(message('zh-CN', 'en')));
+    document.querySelector('#copy').addEventListener('click', async () => {
+      const commands = document.querySelector('#commands');
+      try {
+        await navigator.clipboard.writeText(commands.textContent);
+        status.textContent = message('Commands copied.', '命令已复制。');
+      } catch {
+        const selection = getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(commands);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        status.textContent = message('Commands selected. Use your copy shortcut.', '已选中命令，可使用复制快捷键。');
+      }
+    });
+    draw();
+    setMotion(true);
+  </script>
+</body>
+</html>
