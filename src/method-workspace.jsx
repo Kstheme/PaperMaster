@@ -5,6 +5,7 @@ import { evidenceHref, paperLocation } from '../server/evidence.js';
 
 const labels = { name: '方法名', problem: '解决的问题', pipeline: '方法流程', conditions: '适用条件' };
 const states = { known: '已记录', pending: '待核实', unreported: '论文未说明', not_applicable: '不适用' };
+const outcomes = { effective: '有效', no_improvement: '无明显改善', failure: '失败' };
 const fields = Object.entries(labels);
 const identify = paper => paper.title + ' · ' + paper.version;
 
@@ -86,7 +87,7 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
         return [row.id, { included: true, targetId: row.matchId || '', relatedId: row.relatedId || '', fields: suggested, carry: [] }];
       })));
       setDraft(next);
-      setMessage(next.rows.length ? '' : '所选论文中没有找到与当前主题直接相关且有原文依据的方法。');
+      setMessage(next.rows.length ? '' : '所选论文中没有找到机制与前提匹配、且有可核查出处的元方法候选。');
     });
   }
   function updateTable(updated) {
@@ -172,7 +173,8 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
         <table>
           <thead><tr><th scope="col">交付</th><th scope="col">论文版本</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
             <th scope="col">迁移设想</th><th scope="col">编辑</th></tr></thead>
-          <tbody>{table.rows.map(row => <tr key={row.id}>
+          <tbody>{table.rows.map(row => <React.Fragment key={row.id}>
+          <tr>
             <td><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)} onChange={event => {
               setPreview(null);
               const checked = event.target.checked;
@@ -204,7 +206,9 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
               setMessage('已保存方法行。');
               return true;
             })}/></td>
-          </tr>)}</tbody>
+          </tr>
+          {row.metaMethod && <tr><td colSpan={8}><MethodEvidence row={row}/></td></tr>}
+          </React.Fragment>)}</tbody>
         </table>
       </div>}
       {message && <p role="status" className="message">{message}</p>}
@@ -230,6 +234,29 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       </div>)}
     </section>}
   </>;
+}
+
+function MethodEvidence({ row }) {
+  const meta = row.metaMethod;
+  if (!meta?.structuralProblem || !meta.mechanism || !meta.conditions || !row.practice) return null;
+  return <div className="method-fields">
+    <section><h4>结构性问题</h4><FieldValue field={meta.structuralProblem}/></section>
+    <section><h4>作用机制</h4><FieldValue field={meta.mechanism}/></section>
+    <section><h4>适用前提</h4><FieldValue field={meta.conditions}/></section>
+    <section><h4>具体做法</h4><FieldValue field={row.practice}/></section>
+    {row.experiment && <section><h4>实验记录</h4><ExperimentReview experiment={row.experiment}/></section>}
+    {row.effectCheck && !row.experiment && <section><h4>效果验证</h4><p>{row.effectCheck}</p></section>}
+  </div>;
+}
+
+function ExperimentReview({ experiment }) {
+  return <dl>
+    <div><dt>指标</dt><dd><FieldValue field={experiment.metric}/></dd></div>
+    <div><dt>对照</dt><dd><FieldValue field={experiment.comparison}/></dd></div>
+    <div><dt>数据或条件</dt><dd><FieldValue field={experiment.data}/></dd></div>
+    <div><dt>结果</dt><dd><FieldValue field={experiment.result}/></dd></div>
+    <div><dt>结论</dt><dd>{outcomes[experiment.outcome] || experiment.outcome}</dd></div>
+  </dl>;
 }
 
 function FieldValue({ field }) {
@@ -259,6 +286,7 @@ function Candidate({ candidate, table, batch, choice, onChoice }) {
     <summary>{candidate.fields.name.text} · {identify(candidate.paper)} · {target ? '建议更新' : related ? '关联版本' : '新增候选'}</summary>
     <p>与本主题的关系 · {candidate.topicReason}</p>
     <EvidenceLinks items={candidate.topicEvidence}/>
+    <MethodEvidence row={candidate}/>
     <label className="check"><input type="checkbox" checked={choice.included} onChange={event => onChoice({ included: event.target.checked })}/>应用此候选</label>
     {!!same.length && <label>更新到<select value={choice.targetId} onChange={event => onChoice({ targetId: event.target.value, fields: {} })}>
       <option value="">新增方法行</option>{same.map(row => <option key={row.id} value={row.id}>{row.fields.name.text}</option>)}</select></label>}
