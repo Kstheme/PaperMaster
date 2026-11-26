@@ -244,6 +244,24 @@ progress { width: 100%; height: 7px; accent-color: var(--accent); }
 .takeaways .markdown > * { margin: 3px 0; }
 .chapter-body { line-height: 1.85; }
 .chapter-body > .markdown { max-width: 49rem; }
+.reading-highlight-toolbar {
+  position: fixed; z-index: 30; display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px 5px 12px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); box-shadow: 0 10px 28px #342f2126;
+}
+.reading-highlight-label { color: var(--muted); font-size: 12px; }
+.reading-highlight-toolbar button {
+  width: 22px; height: 22px; padding: 0; border-radius: 50%; border-color: var(--line-strong);
+}
+.reading-highlight-toolbar button[data-color="amber"] { background: #e7c56a; }
+.reading-highlight-toolbar button[data-color="green"] { background: #b7d39a; }
+.reading-highlight-toolbar button[data-color="blue"] { background: #a9c8ea; }
+.reading-highlight-toolbar button[data-color="rose"] { background: #efb4c0; }
+mark.reading-highlight { color: inherit; border-radius: 2px; padding: 0; }
+mark.reading-highlight[data-color="amber"] { background: #f3d98a; }
+mark.reading-highlight[data-color="green"] { background: #d5ebc4; }
+mark.reading-highlight[data-color="blue"] { background: #d3e4f7; }
+mark.reading-highlight[data-color="rose"] { background: #f8d5dc; }
 .chapter-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 27px; padding-top: 15px; border-top: 1px solid var(--line); }
 .chapter-pagination button { font-size: 13px; }
 .chapter-pagination button:only-child:last-child { margin-left: auto; }

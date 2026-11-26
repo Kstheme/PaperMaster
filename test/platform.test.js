@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createApp } from '../server/http.js';
+import { locateHighlight } from '../server/highlight-anchor.js';
 import { openLibrary } from '../server/library.js';
 import { arxivLink, githubLink } from '../server/import.js';
 
@@ -574,6 +575,85 @@ test('startup recovers an active job as interrupted', async t => {
     assert.equal(job.planned.length, 4);
     assert.equal(job.sections[0].markdown, '已保存');
   } finally { await app.close(); }
+});
+
+test('a reading highlight is stored on its reading record and restored after reload', async t => {
+  const quote = '阅读高亮落在这段正文里';
+  const passage = `前文。${quote}。中段。${quote}。后文。`;
+  const second = passage.lastIndexOf(quote);
+  assert.deepEqual(locateHighlight(passage, {
+    quote, prefix: passage.slice(second - 4, second), suffix: passage.slice(second + quote.length, second + quote.length + 3),
+    start: passage.indexOf(quote), end: passage.indexOf(quote) + quote.length,
+  }), [second, second + quote.length]);
+  assert.deepEqual(locateHighlight('abc阅读高亮xyz', { quote: '阅读高亮', prefix: 'abc', suffix: 'xyz', start: 0, end: 4 }), [3, 7]);
+
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-highlight-'));
+  let app;
+  t.after(async () => {
+    await app?.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  const paperId = randomUUID();
+  const versionId = randomUUID();
+  const jobA = randomUUID();
+  const jobB = randomUUID();
+  const markdown = `前文。${quote}。后文保持不变。`;
+  const start = markdown.indexOf(quote);
+  const section = { key: 'overview', title: '论文速览', markdown };
+  const library = await openLibrary(directory);
+  library.put('papers', { id: paperId, title: '阅读高亮示例', versionId, versions: [{ id: versionId, name: 'v1.pdf', pages: 1 }], repos: [] });
+  for (const id of [jobA, jobB]) {
+    library.put('jobs', { id, mode: 'deep', status: 'completed', updated: '2026-11-26T00:00:00.000Z',
+      references: [{ id: paperId, versionId }], sections: [{ ...section }] });
+  }
+  library.close();
+
+  app = await createApp({ directory });
+  let token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function request(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }) });
+    const result = await response.json();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+  const anchor = { section: 'overview', color: 'amber', quote, prefix: markdown.slice(0, start), suffix: markdown.slice(start + quote.length), start, end: start + quote.length };
+  const created = await request('jobs/' + jobA + '/highlights', { method: 'POST', json: anchor, status: 201 });
+  assert.equal(created.jobId, jobA);
+  assert.equal(created.section, 'overview');
+  assert.equal(created.color, 'amber');
+  assert.equal(created.quote, quote);
+  assert.equal(created.prefix, anchor.prefix);
+  assert.equal(created.suffix, anchor.suffix);
+  assert.equal(created.start, start);
+  assert.equal(created.end, start + quote.length);
+  assert.match(created.id, /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
+  assert.match(created.created, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
+  assert.deepEqual(await request('jobs/' + jobB + '/highlights'), []);
+  await request('jobs/' + jobA + '/highlights', { method: 'POST', json: { ...anchor, quote: '不在正文中的句子', start: 0, end: '不在正文中的句子'.length }, status: 400 });
+  assert.equal(Object.hasOwn(await request('jobs/' + jobA), 'highlights'), false);
+
+  await app.close();
+  const stored = await openLibrary(directory);
+  try {
+    assert.deepEqual(stored.get('highlights', created.id), created);
+    assert.deepEqual(stored.all('highlights').map(item => item.jobId), [jobA]);
+    assert.equal(Object.hasOwn(stored.get('jobs', jobA), 'highlights'), false);
+  } finally { stored.close(); }
+
+  app = await createApp({ directory });
+  token = (await (await fetch(app.url + '/api/session')).json()).token;
+  assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
+  const other = await request('jobs/' + jobB + '/highlights', {
+    method: 'POST', json: { ...anchor, color: 'blue' }, status: 201,
+  });
+  assert.equal(other.jobId, jobB);
+  assert.equal(other.color, 'blue');
+  assert.notEqual(other.id, created.id);
+  assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
+  assert.deepEqual(await request('jobs/' + jobB + '/highlights'), [other]);
 });
 
 test('import targets accept only the supported public hosts', () => {
