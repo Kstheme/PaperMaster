@@ -62,7 +62,7 @@
 .module-detail dt { color: var(--accent); font-weight: 650; }
 .module-detail dd { margin: 0; }
 .module-detail dd .markdown > * { margin: 6px 0; }
-.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); }
+.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); color: var(--text); }
 .lab-stage { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: clamp(12px, 2vw, 20px); align-items: start; }
 .lab-visual, .lab-inputs { min-width: 0; }
 .lab-visual { padding: 10px; border: 1px solid var(--line); background: var(--inset); border-radius: 8px; }
@@ -130,6 +130,9 @@
   --line: var(--studio-line);
   --line-strong: #83907c;
   --signal: #f5c791;
+  --signal-tint: #3a3228;
+  --error: #f0b2a8;
+  --error-tint: #3a2824;
   --diagram-grid: var(--studio-line);
   color: var(--text);
   background: var(--surface);
