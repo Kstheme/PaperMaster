@@ -10,6 +10,7 @@ import { Followups } from './reading-tools.jsx';
 import { MethodWorkspace } from './method-workspace.jsx';
 import { ConnectionPicker, EffortField, paperMatches, useAction, useCodexCatalog } from './workbench-fields.jsx';
 import { MotionTabsList, positionHighlight } from './interface-motion.jsx';
+import { FirstReading, firstReadingSkipped, rememberFirstReading } from './first-reading.jsx';
 import { figureChapter, figureKeys } from '../server/reading-figures.js';
 import './style.css';
 import './interaction.css';
@@ -571,7 +572,10 @@ function App() {
   const [connection, setConnection] = useState('');
   const [noteSignal, setNoteSignal] = useState(0);
   const [showImport, setShowImport] = useState(false);
+  const [guide, setGuide] = useState('pending');
+  const [guideStep, setGuideStep] = useState(0);
   const [run, busy] = useAction(setError);
+  const guideCatalog = useCodexCatalog(guide === 'open');
   const paper = library.papers.find(item => item.id === selected);
   const foundPapers = library.papers.filter(item => paperMatches(item, query));
   const requestedPdf = incoming.get('paper') === selected && paper?.versions.find(item => item.id === incoming.get('pdf'));
@@ -585,6 +589,11 @@ function App() {
     setTab('result');
     reload().catch(error => setError(error.message));
   }, [reload, setError]);
+  useEffect(() => {
+    if (!ready || guide !== 'pending') return;
+    const existing = library.papers.length > 0 || library.jobs.length > 0;
+    setGuide(existing || firstReadingSkipped() ? 'workbench' : 'open');
+  }, [ready, guide, library.papers.length, library.jobs.length]);
   useEffect(() => {
     if (!ready) return;
     const previous = incoming.get('job') || (!incoming.has('pdf') && localStorage.getItem('papermaster.job'));
@@ -623,23 +632,34 @@ function App() {
     localStorage.removeItem('papermaster.job');
   }
 
+  function skipGuide(nextTab) {
+    rememberFirstReading();
+    setGuide('workbench');
+    if (typeof nextTab === 'string') setTab(nextTab);
+  }
+
+  function finishGuide(job) {
+    setGuide('workbench');
+    onJob(job);
+  }
+
   return <div className="workspace">
     <a className="skip-link" href="#paper-workspace">跳到阅读区</a>
     <header className="topbar">
       <div className="brand"><span><BookOpen size={19} aria-hidden="true"/></span>PaperMaster</div>
       <nav className="actions topbar-actions" aria-label="工作区工具">
-        <button aria-pressed={tab === 'methods'} onClick={() => setTab(tab === 'methods' ? (current ? 'result' : 'read') : 'methods')}>
+        <button aria-pressed={guide !== 'open' && tab === 'methods'} onClick={() => guide === 'open' ? skipGuide('methods') : setTab(tab === 'methods' ? (current ? 'result' : 'read') : 'methods')}>
           <Layers3 size={16}/>主题方法表</button>
-        <button aria-pressed={tab === 'connections'} aria-label={tab === 'connections' ? '返回阅读' : '模型连接'}
-          title={tab === 'connections' ? '返回阅读' : '模型连接'}
-          onClick={() => setTab(tab === 'connections' ? (current ? 'result' : 'read') : 'connections')}>
-          <KeyRound size={16}/><span className="topbar-label">{tab === 'connections' ? '返回阅读' : '模型连接'}</span>
+        <button aria-pressed={guide === 'open' ? guideStep === 1 : tab === 'connections'} aria-label={guide !== 'open' && tab === 'connections' ? '返回阅读' : '模型连接'}
+          title={guide !== 'open' && tab === 'connections' ? '返回阅读' : '模型连接'}
+          onClick={() => guide === 'open' ? setGuideStep(1) : setTab(tab === 'connections' ? (current ? 'result' : 'read') : 'connections')}>
+          <KeyRound size={16}/><span className="topbar-label">{guide !== 'open' && tab === 'connections' ? '返回阅读' : '模型连接'}</span>
         </button>
         <button aria-label="备份" title="备份" disabled={busy}
           onClick={() => run(async () => download(await api('backup', { blob: true }), 'papermaster-backup.tar.gz'))}>
           <ArrowDownToLine size={16}/><span className="topbar-label">备份</span></button>
-        <button className="primary" aria-expanded={showImport || (ready && !paper && !['connections', 'methods'].includes(tab))}
-          onClick={() => setShowImport(value => !value)}><Plus size={16}/>导入论文</button>
+        <button className="primary" aria-expanded={guide === 'open' ? guideStep === 0 : showImport || (ready && !paper && !['connections', 'methods'].includes(tab))}
+          onClick={() => guide === 'open' ? setGuideStep(0) : setShowImport(value => !value)}><Plus size={16}/>导入论文</button>
       </nav>
     </header>
     <aside className="rail" aria-labelledby="library-label">
@@ -655,10 +675,16 @@ function App() {
     </aside>
     <main id="paper-workspace" tabIndex={-1}>
       {error && <div className="error global" role="alert">{error}<button onClick={() => setError('')}>关闭</button></div>}
-      {(showImport || (ready && !paper && !['connections', 'methods'].includes(tab))) && <ImportPaper isMain={!paper && tab !== 'connections'} onError={setError} onPaper={async result => {
+      {guide === 'pending' && <p role="status">正在加载论文库…</p>}
+      {guide === 'open' && <FirstReading step={guideStep} onStep={setGuideStep} paper={paper} connections={library.connections}
+        onSkip={skipGuide}
+        importPanel={<ImportPaper isMain={false} onError={setError} onPaper={async result => { await reload(); select(result.id); }}/>}
+        connectPanel={<ProviderForm library={library} catalog={guideCatalog} onSaved={async item => { await reload(); setConnection(item.id); }}/>}
+        readingPanel={<StartReading key={paper?.id} {...{ paper, library, connection, setConnection, onJob: finishGuide, onChanged: reload, onError: setError }}/>}/>}
+      {guide === 'workbench' && <>
+      {(showImport || (!paper && !['connections', 'methods'].includes(tab))) && <ImportPaper isMain={!paper && tab !== 'connections'} onError={setError} onPaper={async result => {
         await reload(); select(result.id); setShowImport(false);
       }}/>}
-      {!ready && <p role="status">正在加载论文库…</p>}
       {tab === 'connections' && <Connections library={library} onError={setError} onUpdated={reload}
         onSaved={async item => { await reload(); setConnection(item.id); }}/>}
       {tab === 'methods' && <MethodWorkspace library={library} defaultConnection={connection} onError={setError}/>}
@@ -699,6 +725,7 @@ function App() {
           </section></Tabs.Content>
           <Tabs.Content value="note"><Note key={paper.id} paper={paper} jobs={library.jobs} onError={setError} revisionSignal={noteSignal}/></Tabs.Content>
         </Tabs.Root>
+      </>}
       </>}
     </main>
   </div>;

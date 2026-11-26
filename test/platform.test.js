@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -903,6 +903,64 @@ test('a reading highlight is stored on its reading record and restored after rel
   assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
   assert.deepEqual(await request('jobs/' + jobB + '/highlights'), [other]);
 });
+
+test('a fresh data directory has no preset papers and an existing library still opens', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-empty-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 3 }));
+  let paper;
+  const app = await createApp({ directory });
+  try {
+    const headers = await sessionHeaders(app);
+    const empty = await (await fetch(app.url + '/api/library', { headers })).json();
+    assert.deepEqual(empty.papers, []);
+    assert.deepEqual(empty.jobs, []);
+    assert.deepEqual(await readdir(join(directory, 'papers')), []);
+
+    const uploaded = await fetch(app.url + '/api/papers?name=owned.pdf', {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/pdf' },
+      body: pdf('Owned Paper', 'A reader-owned paper explains one concrete method, the input it expects, and the result it reports.'),
+    });
+    assert.equal(uploaded.status, 201);
+    paper = await uploaded.json();
+    const current = await (await fetch(app.url + '/api/papers/' + paper.id + '/note', { headers })).json();
+    const saved = await fetch(app.url + '/api/papers/' + paper.id + '/note', {
+      method: 'PUT', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ markdown: '# 主笔记\n\n已有阅读成果应当保留。', revision: current.revision }),
+    });
+    assert.equal(saved.status, 200);
+  } finally { await app.close(); }
+
+  const stored = await openLibrary(directory);
+  try {
+    stored.put('jobs', {
+      id: randomUUID(), mode: 'skim', status: 'completed', formatVersion: 2, connectionId: 'kept',
+      references: [{ id: paper.id, versionId: paper.versionId }],
+      sections: [{ key: 'skim', title: '论文全貌', markdown: '已有阅读记录' }],
+      created: new Date().toISOString(), updated: new Date().toISOString(),
+    });
+  } finally { stored.close(); }
+
+  const reopened = await createApp({ directory });
+  try {
+    const headers = await sessionHeaders(reopened);
+    const library = await (await fetch(reopened.url + '/api/library', { headers })).json();
+    assert.equal(library.papers.length, 1);
+    assert.equal(library.papers[0].id, paper.id);
+    assert.equal(library.papers[0].title, paper.title);
+    assert.equal(library.jobs.length, 1);
+    assert.equal(library.jobs[0].status, 'completed');
+    const job = await (await fetch(reopened.url + '/api/jobs/' + library.jobs[0].id, { headers })).json();
+    assert.equal(job.sections[0].markdown, '已有阅读记录');
+    const note = await (await fetch(reopened.url + '/api/papers/' + paper.id + '/note', { headers })).json();
+    assert.match(note.markdown, /已有阅读成果应当保留/);
+    assert.deepEqual((await readdir(join(directory, 'papers'))).filter(name => name !== paper.id), []);
+  } finally { await reopened.close(); }
+});
+
+async function sessionHeaders(app) {
+  const { token } = await (await fetch(app.url + '/api/session')).json();
+  return { 'x-papermaster-session': token };
+}
 
 test('import targets accept only the supported public hosts', () => {
   assert.equal(arxivLink('https://arxiv.org/pdf/1706.03762v7.pdf').baseId, '1706.03762');
