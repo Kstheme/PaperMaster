@@ -31,11 +31,11 @@ papermaster --data-dir ./my-library --port 43948
 
 ## 教程
 
-下面三张图是首次打开、三种读法，以及从一段正文到方法快照的路径。图后面的步骤使用界面上的原词。
+下面的动图演示如何开始阅读、切换读法、保存批注，以及导出方法快照。
 
 ### 1. 打开一个空论文库
 
-![从空论文库到第一篇阅读，或跳过进入工作台](docs/images/flow-start.zh.svg)
+![导入论文、连接模型，再开始第一次阅读](docs/images/flow-start.zh.gif)
 
 新的数据目录里没有示例论文。主区标题是「从空论文库开始」，三步是「导入论文」「连接模型」「开始阅读」。
 
@@ -59,7 +59,7 @@ papermaster --data-dir ./my-library --port 43948
 
 ### 3. 选择读法
 
-![泛读、完整精读和关联仓库精读共用一张卡片](docs/images/flow-reading.zh.svg)
+![依次展示泛读摘要、完整精读的公式示例，以及关联仓库精读的源码片段](docs/images/flow-reading.zh.gif)
 
 在论文的「阅读」页选择一种方式。三种方式不必按顺序做完。
 
@@ -88,7 +88,7 @@ papermaster --data-dir ./my-library --port 43948
 
 ### 5. 留下一段正文
 
-![划选、高亮、批注，确认后进入主笔记](docs/images/flow-keep.zh.svg)
+![高亮一句话，写下批注，再连同章节链接加入主笔记](docs/images/flow-keep.zh.gif)
 
 在章节正文里划选一句话。工具条上有黄色、绿色、蓝色、粉色，以及「写批注」。
 
@@ -113,7 +113,7 @@ papermaster --data-dir ./my-library --port 43948
 
 ### 8. 建立主题方法表
 
-![候选、同一机制，以及一份确认过的快照](docs/images/flow-method.zh.svg)
+![按共同机制并排比较两篇论文的候选行，并确认导出快照](docs/images/flow-method.zh.gif)
 
 打开「主题方法表」。新建主题，例如「有界搜索」，也可以写明这张表要解决的问题。选择最多 12 个已经有阅读记录的论文版本，点「生成候选行」。
 
