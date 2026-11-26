@@ -1,10 +1,13 @@
-import React, { lazy, Suspense, useRef, useState } from 'react';
+import React, { lazy, Suspense, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, ArrowRight, BookmarkPlus } from 'lucide-react';
 import { Sample } from './illustrations.jsx';
 import { Markdown } from './markdown.jsx';
+import { api } from './api.js';
 import { EffortInfo, EvidenceLinks } from './workbench-fields.jsx';
 import { RepositoryReading } from './interaction-reader.jsx';
+import { readingHighlightColors } from '../server/highlight-anchor.js';
+import { paintReadingHighlights, selectionAnchor, selectionBox } from './reading-highlights.js';
 import { readingFigureParts, splitReadingMarkdown } from '../server/reading-markdown.js';
 import { useLocale } from './locale.jsx';
 
@@ -17,9 +20,79 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   const active = sections[activeIndex];
   const heading = useRef(null);
   const article = useRef(null);
+  const bodyRef = useRef(null);
+  const saving = useRef(false);
+  const [highlights, setHighlights] = useState([]);
+  const [toolbar, setToolbar] = useState(null);
+  const [highlightError, setHighlightError] = useState('');
   const incoming = new URLSearchParams(window.location.search);
   const initialStep = incoming.get('job') === id && incoming.get('chapter') === active.key ? incoming.get('step') : null;
   const { t } = useLocale();
+
+  useEffect(() => {
+    let ignore = false;
+    api('jobs/' + id + '/highlights').then(items => {
+      if (!ignore) setHighlights(items);
+    }).catch(error => { if (!ignore) setHighlightError(error.message); });
+    return () => { ignore = true; };
+  }, [id]);
+
+  useLayoutEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return undefined;
+    paintReadingHighlights(root, highlights.filter(item => item.section === active.key));
+    return () => paintReadingHighlights(root, []);
+  }, [highlights, active.key, active.markdown]);
+
+  useEffect(() => {
+    const show = () => {
+      if (saving.current) return;
+      const anchor = selectionAnchor(bodyRef.current);
+      const box = anchor && selectionBox();
+      if (!anchor || !box) {
+        setToolbar(current => current ? null : current);
+        return;
+      }
+      setToolbar(current => current && current.anchor.start === anchor.start && current.anchor.end === anchor.end
+        && current.anchor.quote === anchor.quote && current.top === box.top && current.left === box.left
+        ? current : { anchor, ...box });
+    };
+    const onPointerUp = event => {
+      if (event.target instanceof Element && event.target.closest('.reading-highlight-toolbar')) return;
+      show();
+    };
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('keyup', show);
+    document.addEventListener('selectionchange', show);
+    window.addEventListener('scroll', show, true);
+    window.addEventListener('resize', show);
+    return () => {
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('keyup', show);
+      document.removeEventListener('selectionchange', show);
+      window.removeEventListener('scroll', show, true);
+      window.removeEventListener('resize', show);
+    };
+  }, [active.key]);
+
+  async function chooseColor(color) {
+    const anchor = toolbar?.anchor;
+    if (!anchor || saving.current) return;
+    saving.current = true;
+    setHighlightError('');
+    try {
+      const saved = await api('jobs/' + id + '/highlights', {
+        method: 'POST', json: { section: active.key, color, ...anchor },
+      });
+      setHighlights(items => items.some(item => item.id === saved.id) ? items : [...items, saved]);
+      setToolbar(null);
+      window.getSelection()?.removeAllRanges();
+    } catch (error) {
+      setHighlightError(error.message || '阅读高亮没有保存。');
+    } finally {
+      saving.current = false;
+    }
+  }
 
   function openTool(text, context) {
     const selection = window.getSelection();
@@ -54,8 +127,15 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
             {onAppend && <button disabled={busy} onClick={() => onAppend(active.key)}><BookmarkPlus size={15}/>{t('addToNote')}</button>}
           </div>
         </div>
-        <Chapter item={active} figures={figures?.[active.key]} repo={repo} initialStep={initialStep} onTool={onTool ? openTool : undefined}
+        {highlightError && <p className="error" role="alert">{highlightError}</p>}
+        <Chapter item={active} figures={figures?.[active.key]} repo={repo} initialStep={initialStep} bodyRef={bodyRef} onTool={onTool ? openTool : undefined}
           renderFigure={name => renderFigure(name, onTool ? openTool : undefined)}/>
+        {toolbar && <div className="reading-highlight-toolbar" role="toolbar" aria-label="阅读高亮" style={{ top: toolbar.top, left: toolbar.left }}
+          onPointerDown={event => event.preventDefault()}>
+          <span className="reading-highlight-label">阅读高亮</span>
+          {readingHighlightColors.map(color => <button key={color.id} type="button" data-color={color.id} aria-label={color.label} title={color.label}
+            onClick={() => chooseColor(color.id)}/>)}
+        </div>}
         {active.searched && <aside className="repo-reading-evidence">
           <h3>{t('chapterEvidence')}</h3>
           {active.evidence?.length ? <EvidenceLinks items={active.evidence}/> : <p className="muted">{t('noEvidence')}</p>}
@@ -70,7 +150,11 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   </Tabs.Root>;
 }
 
-function Chapter({ item, figures, renderFigure, repo, onTool, initialStep }) {
+const ChapterMarkdown = memo(function ChapterMarkdown({ children }) {
+  return <Markdown chapter>{children}</Markdown>;
+});
+
+function Chapter({ item, figures, renderFigure, repo, onTool, initialStep, bodyRef }) {
   const { t } = useLocale();
   const sample = !figures?.length && Boolean(item.sample?.length);
   const softmax = !figures?.length && item.simulation === 'softmax';
@@ -82,11 +166,11 @@ function Chapter({ item, figures, renderFigure, repo, onTool, initialStep }) {
       <h3>{t('takeaways')}</h3>
       <ul>{item.takeaways.map((point, index) => <li key={index}><Markdown>{point}</Markdown></li>)}</ul>
     </aside>}
-    <div className="chapter-body">
+    <div className="chapter-body" ref={bodyRef}>
       {readingFigureParts(before, keys).map((part, index) => part.key
         ? <React.Fragment key={part.key}>{part.key === item.repository?.key
           ? <RepositoryReading block={item.repository} repo={repo} onTool={onTool} initialStep={initialStep}/> : renderFigure(part.key)}</React.Fragment>
-        : <Markdown chapter key={index}>{part.markdown}</Markdown>)}
+        : <ChapterMarkdown key={index}>{part.markdown}</ChapterMarkdown>)}
       {sample && softmax ? <Tabs.Root className="chapter-demo" defaultValue="formula">
         <Tabs.List className="demo-tabs" aria-label={t('demoTabs')}>
           <Tabs.Trigger value="formula">{t('formulaDemo')}</Tabs.Trigger>
@@ -95,7 +179,7 @@ function Chapter({ item, figures, renderFigure, repo, onTool, initialStep }) {
         <Tabs.Content value="formula"><Formula/></Tabs.Content>
         <Tabs.Content value="sample"><Sample steps={item.sample}/></Tabs.Content>
       </Tabs.Root> : sample ? <Sample steps={item.sample}/> : softmax ? <Formula/> : null}
-      {after && readingFigureParts(after).map((part, index) => <Markdown chapter key={index}>{part.markdown}</Markdown>)}
+      {after && readingFigureParts(after).map((part, index) => <ChapterMarkdown key={'after-' + index}>{part.markdown}</ChapterMarkdown>)}
     </div>
   </>;
 }
