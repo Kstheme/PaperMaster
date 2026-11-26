@@ -1,6 +1,6 @@
 import React, { useId } from 'react';
+import { useLocale } from './locale.jsx';
 
-// Shared deep-reading card. Slot order: title, actions, result, evidence, save.
 function Region({ label, className, children }) {
   const id = useId();
   return <div className={'reading-card-region ' + className} role="region" aria-labelledby={id}>
@@ -16,25 +16,24 @@ export function ReadingCard({
   title,
   intro,
   actions,
-  actionsLabel = '操作',
-  children,
+  actionsLabel,
   result,
-  resultLabel = '结果',
+  resultLabel,
   evidence,
-  evidenceLabel = '原始证据',
+  evidenceLabel,
   save,
-  saveLabel = '保存',
+  saveLabel,
 }) {
+  const { t } = useLocale();
   return <section className={['reading-card', className].filter(Boolean).join(' ')} aria-label={label || title}>
     <header className="reading-card-header">
       {kicker && <p className="eyebrow">{kicker}</p>}
       <h3>{title}</h3>
       {intro}
     </header>
-    {actions != null && <Region className="reading-card-actions" label={actionsLabel}>{actions}</Region>}
-    {children != null && <div className="reading-card-body">{children}</div>}
-    {result != null && <Region className="reading-card-result" label={resultLabel}>{result}</Region>}
-    {evidence != null && <Region className="reading-card-evidence" label={evidenceLabel}>{evidence}</Region>}
-    {save != null && <Region className="reading-card-save" label={saveLabel}>{save}</Region>}
+    {actions != null && <Region className="reading-card-actions" label={actionsLabel || t('cardActions')}>{actions}</Region>}
+    {result != null && <Region className="reading-card-result" label={resultLabel || t('resultLabel')}>{result}</Region>}
+    {evidence != null && <Region className="reading-card-evidence" label={evidenceLabel || t('cardEvidence')}>{evidence}</Region>}
+    {save != null && <Region className="reading-card-save" label={saveLabel || t('save')}>{save}</Region>}
   </section>;
 }

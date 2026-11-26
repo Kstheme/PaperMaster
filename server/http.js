@@ -24,6 +24,7 @@ import { deliveryMarkdown, methodTables } from './method-tables.js';
 import { traceRepository } from './repository-reading.js';
 import { readingRepositoryBlock } from './draw2think-reading.js';
 import { readLanguage, saveLanguage } from './language.js';
+import { readFirstReading, saveFirstReading } from './first-reading.js';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const contentTypes = {
@@ -107,7 +108,7 @@ async function route(req, res, url, { library, reader, models, followups, highli
         id, references, mode, status, updated, interactive: Boolean(interaction),
         sections: sections.filter(item => item.markdown).map(({ key, title }) => ({ key, title })),
       })),
-      providers, language: readLanguage(library),
+      providers, language: readLanguage(library), firstReadingSkipped: readFirstReading(library),
       modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
   }
   if (resource === 'method-tables') {
@@ -195,6 +196,9 @@ async function route(req, res, url, { library, reader, models, followups, highli
   }
   if (resource === 'settings' && id === 'language' && !action && method === 'PUT') {
     return json(res, saveLanguage(library, await body(req)));
+  }
+  if (resource === 'settings' && id === 'first-reading' && !action && method === 'PUT') {
+    return json(res, saveFirstReading(library, await body(req)));
   }
   if (resource === 'connections') {
     if (!id && method === 'POST') return json(res, await models.save(await body(req)), 201);
@@ -400,31 +404,33 @@ async function readNote(library, id) {
   return { markdown, revision: createHash('sha256').update(markdown).digest('hex') };
 }
 
-async function appendNote(library, id, marker, passage) {
+const noteLimit = 300_000;
+
+async function updateNote(library, id, revise) {
   const note = await readNote(library, id);
-  if (!note.markdown.includes(marker)) {
-    const contents = note.markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage;
-    if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
-    await writeAtomic(library.path(id, 'note.md'), contents);
+  const contents = revise(note.markdown);
+  if (typeof contents === 'string') {
+    if (contents.length > noteLimit) throw new AppError('笔记超过大小限制。可先导出已有内容。');
+    if (contents !== note.markdown) await writeAtomic(library.path(id, 'note.md'), contents);
   }
   return readNote(library, id);
 }
 
+async function appendNote(library, id, marker, passage) {
+  return updateNote(library, id, markdown => markdown.includes(marker) ? null
+    : markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage);
+}
+
 async function replaceMarkedNote(library, id, marker, passage) {
-  const note = await readNote(library, id);
-  const block = marker + '\n\n' + passage;
-  const start = note.markdown.indexOf(marker);
-  let contents;
-  if (start < 0) contents = note.markdown.trimEnd() + '\n\n' + block + '\n';
-  else {
-    const next = note.markdown.indexOf('\n<!-- papermaster:', start + marker.length);
-    const end = next < 0 ? note.markdown.length : next;
-    const suffix = note.markdown.slice(end);
-    contents = note.markdown.slice(0, start) + block + (suffix ? (suffix.startsWith('\n') ? suffix : '\n' + suffix) : '\n');
-  }
-  if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
-  if (contents !== note.markdown) await writeAtomic(library.path(id, 'note.md'), contents);
-  return readNote(library, id);
+  return updateNote(library, id, markdown => {
+    const block = marker + '\n\n' + passage;
+    const start = markdown.indexOf(marker);
+    if (start < 0) return markdown.trimEnd() + '\n\n' + block + '\n';
+    const next = markdown.indexOf('\n<!-- papermaster:', start + marker.length);
+    const end = next < 0 ? markdown.length : next;
+    const suffix = markdown.slice(end);
+    return markdown.slice(0, start) + block + (suffix ? (suffix.startsWith('\n') ? suffix : '\n' + suffix) : '\n');
+  });
 }
 
 function exportJob(library, job, key, title = true) {

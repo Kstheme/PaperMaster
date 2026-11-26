@@ -90,7 +90,7 @@ export function clearReadingHighlights(root) {
   for (const block of root.querySelectorAll('.markdown')) block.normalize();
 }
 
-export function paintReadingHighlights(root, highlights) {
+export function paintReadingHighlights(root, highlights, openLabel = '打开高亮批注') {
   clearReadingHighlights(root);
   if (!root || !highlights?.length) return;
   const ordered = [...highlights].filter(item => colors.has(item.color))
@@ -98,11 +98,11 @@ export function paintReadingHighlights(root, highlights) {
   for (const item of ordered) {
     const nodes = markdownTextNodes(root);
     const span = locateHighlight(nodes.map(node => node.nodeValue).join(''), item);
-    if (span) wrapSpan(nodes, span[0], span[1], item);
+    if (span) wrapSpan(nodes, span[0], span[1], item, openLabel);
   }
 }
 
-function wrapSpan(nodes, start, end, highlight) {
+function wrapSpan(nodes, start, end, highlight, openLabel) {
   let offset = 0;
   const parts = [];
   for (const node of nodes) {
@@ -124,10 +124,10 @@ function wrapSpan(nodes, start, end, highlight) {
     mark.dataset.highlightId = highlight.id;
     mark.dataset.color = highlight.color;
     if (highlight.annotation?.text) mark.dataset.annotated = 'true';
-    mark.title = '打开高亮批注';
+    mark.title = openLabel;
     mark.setAttribute('role', 'button');
     mark.tabIndex = 0;
-    mark.setAttribute('aria-label', '打开高亮批注');
+    mark.setAttribute('aria-label', openLabel);
     part.before(mark);
     mark.append(part);
   }

@@ -35,7 +35,8 @@ function useLibrary() {
   }, []);
   useEffect(() => { reload().catch(err => setError(err.message)); }, [reload]);
   const setLanguage = useCallback(language => setLibrary(current => ({ ...current, language })), []);
-  return { library, ready, error, setError, reload, setLanguage };
+  const markGuideSkipped = useCallback(() => setLibrary(current => ({ ...current, firstReadingSkipped: true })), []);
+  return { library, ready, error, setError, reload, setLanguage, markGuideSkipped };
 }
 
 function ImportPaper({ onPaper, onError, isMain }) {
@@ -593,7 +594,7 @@ function Exercise({ job, library, onError }) {
 }
 
 function App() {
-  const { library, ready, error, setError, reload, setLanguage } = useLibrary();
+  const { library, ready, error, setError, reload, setLanguage, markGuideSkipped } = useLibrary();
   const interfaceLanguage = library.language?.interface === 'en' ? 'en' : 'zh';
   const t = (key, vars) => translate(interfaceLanguage, key, vars);
   useEffect(() => { document.documentElement.lang = interfaceLanguage === 'en' ? 'en' : 'zh-CN'; }, [interfaceLanguage]);
@@ -624,8 +625,8 @@ function App() {
   useEffect(() => {
     if (!ready || guide !== 'pending') return;
     const existing = library.papers.length > 0 || library.jobs.length > 0;
-    setGuide(existing || firstReadingSkipped() ? 'workbench' : 'open');
-  }, [ready, guide, library.papers.length, library.jobs.length]);
+    setGuide(existing || firstReadingSkipped(library) ? 'workbench' : 'open');
+  }, [ready, guide, library.papers.length, library.jobs.length, library.firstReadingSkipped]);
   useEffect(() => {
     if (!ready) return;
     const previous = incoming.get('job') || (!incoming.has('pdf') && localStorage.getItem('papermaster.job'));
@@ -665,9 +666,9 @@ function App() {
   }
 
   function skipGuide(nextTab) {
-    rememberFirstReading();
     setGuide('workbench');
     if (typeof nextTab === 'string') setTab(nextTab);
+    rememberFirstReading().then(markGuideSkipped).catch(() => {});
   }
 
   function finishGuide(job) {

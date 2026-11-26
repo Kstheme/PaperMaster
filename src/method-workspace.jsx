@@ -4,10 +4,14 @@ import { groupMethodRecords } from './method-groups.js';
 import { useLocale } from './locale.jsx';
 import { ConnectionPicker, EvidenceLinks, paperMatches, useAction } from './workbench-fields.jsx';
 import { evidenceHref, paperLocation } from '../server/evidence.js';
+import { unverifiedEffect } from '../server/unverified-effect.js';
 
 const fieldKeys = ['name', 'problem', 'pipeline', 'conditions'];
 const identify = paper => paper.title + ' · ' + paper.version;
-const storedUnverifiedEffect = '原论文未验证效果';
+
+function effectText(effectCheck, t) {
+  return effectCheck === unverifiedEffect ? t('unverifiedEffect') : effectCheck;
+}
 
 function useMethodText() {
   const { t } = useLocale();
@@ -233,11 +237,10 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
 
     {preview && <section className="panel" aria-label={t('confirmDelivery')}>
       <h2>{t('confirmDeliveryCount', { count: preview.rows.length })}</h2>
-      <p className="muted">笔记 Markdown 与 Auto Research JSON 都来自这次确认。确认之后再改方法表，这份快照保持不变。</p>
-      {preview.rows.some(row => row.metaMethod && row.practice) && <p className="muted">
-        这份快照提供具体做法、元方法、适用前提、结果和出处，供下游评估迁移。目标任务、结果预测和实验设计由下游完成。</p>}
+      <p className="muted">{t('deliverySameSnapshot')}</p>
+      {preview.rows.some(row => row.metaMethod && row.practice) && <p className="muted">{t('deliveryBoundary')}</p>}
       {preview.rows.map(row => <details key={row.id} open className="method-option">
-        <summary>{row.fields.name.text} · {identify(row.paper)}{row.experiment ? ' · ' + (outcomes[row.experiment.outcome] || row.experiment.outcome) : ''}{row.effectCheck && !row.experiment ? ' · ' + row.effectCheck : ''}</summary>
+        <summary>{row.fields.name.text} · {identify(row.paper)}{row.experiment ? ' · ' + (outcomes[row.experiment.outcome] || row.experiment.outcome) : ''}{row.effectCheck && !row.experiment ? ' · ' + effectText(row.effectCheck, t) : ''}</summary>
         <MethodEvidence row={row}/>
         <dl>{fields.map(([key, label]) => <div key={key}><dt>{label}</dt><dd><FieldValue field={row.fields[key]}/></dd></div>)}</dl>
         {row.idea && <p>{t('ideaLine', { idea: row.idea })}</p>}
@@ -258,48 +261,48 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
 }
 
 function MetaMethodGroup({ group, headingId, included, busy, onToggleIncluded, onToggleIdea, onRemove, onSubmit }) {
+  const { t } = useLocale();
   return <section className="meta-method-group" aria-labelledby={headingId}>
-    <h3 id={headingId}>元方法</h3>
+    <h3 id={headingId}>{t('metaMethod')}</h3>
     <dl className="meta-method-summary">
-      <div><dt>结构性问题</dt><dd>{group.structuralProblem}</dd></div>
-      <div><dt>作用机制</dt><dd>{group.mechanism}</dd></div>
+      <div><dt>{t('structuralProblem')}</dt><dd>{group.structuralProblem}</dd></div>
+      <div><dt>{t('mechanismLabel')}</dt><dd>{group.mechanism}</dd></div>
     </dl>
-    <div className="method-compare" role="region" tabIndex={0} aria-label={'元方法对照 · ' + group.mechanism}>
+    <div className="method-compare" role="region" tabIndex={0} aria-label={t('metaMethodCompare', { mechanism: group.mechanism })}>
       <table>
         <thead><tr>
-          <th scope="col">对照</th>
+          <th scope="col">{t('comparison')}</th>
           {group.rows.map(row => <th key={row.id} scope="col">{row.fields.name.text}</th>)}
         </tr></thead>
         <tbody>
           <tr>
-            <th scope="row">具体做法</th>
-            {group.rows.map(row => <td key={row.id}>{row.practice ? <FieldValue field={row.practice}/> : <p className="muted">未记录</p>}</td>)}
+            <th scope="row">{t('concretePractice')}</th>
+            {group.rows.map(row => <td key={row.id}>{row.practice ? <FieldValue field={row.practice}/> : <p className="muted">{t('unrecorded')}</p>}</td>)}
           </tr>
           <tr>
-            <th scope="row">适用前提</th>
-            {group.rows.map(row => <td key={row.id}>{row.metaMethod.conditions ? <FieldValue field={row.metaMethod.conditions}/> : <p className="muted">未记录</p>}</td>)}
+            <th scope="row">{t('conditionsLabel')}</th>
+            {group.rows.map(row => <td key={row.id}>{row.metaMethod.conditions ? <FieldValue field={row.metaMethod.conditions}/> : <p className="muted">{t('unrecorded')}</p>}</td>)}
           </tr>
           <tr>
-            <th scope="row">结果</th>
+            <th scope="row">{t('resultLabel')}</th>
             {group.rows.map(row => <td key={row.id}><ResultCell row={row}/></td>)}
           </tr>
           <tr>
-            <th scope="row">出处</th>
+            <th scope="row">{t('sourceColumn')}</th>
             {group.rows.map(row => <td key={row.id}>
               <a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
-              {row.relatedId && <p className="muted">有可对照的旧版本</p>}
+              {row.relatedId && <p className="muted">{t('relatedVersion')}</p>}
             </td>)}
           </tr>
           <tr>
-            <th scope="row">迁移设想</th>
-            {group.rows.map(row => <td key={row.id}>{row.idea && <><p>{row.idea}</p>{Object.hasOwn(included, row.id) && <label className="check">
-              <input type="checkbox" checked={included[row.id]} onChange={event => onToggleIdea(row, event.target.checked)}/>一并交付</label>}</>}</td>)}
+            <th scope="row">{t('transferIdea')}</th>
+            {group.rows.map(row => <td key={row.id}><DeliverIdea row={row} included={included} onToggle={onToggleIdea}/></td>)}
           </tr>
           <tr>
-            <th scope="row">交付</th>
+            <th scope="row">{t('deliver')}</th>
             {group.rows.map(row => <td key={row.id}>
-              <label className="check"><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)}
-                onChange={event => onToggleIncluded(row, event.target.checked)}/>选入交付</label>
+              <label className="check"><input type="checkbox" aria-label={t('deliverNamed', { name: row.fields.name.text })} checked={Object.hasOwn(included, row.id)}
+                onChange={event => onToggleIncluded(row, event.target.checked)}/>{t('selectForDelivery')}</label>
               <RowEditor row={row} disabled={busy} onRemove={() => onRemove(row)} onSubmit={data => onSubmit(row, data)}/>
             </td>)}
           </tr>
@@ -309,33 +312,43 @@ function MetaMethodGroup({ group, headingId, included, busy, onToggleIncluded, o
   </section>;
 }
 
+function DeliverIdea({ row, included, onToggle }) {
+  const { t } = useLocale();
+  if (!row.idea) return null;
+  return <>
+    <p>{row.idea}</p>
+    {Object.hasOwn(included, row.id) && <label className="check">
+      <input type="checkbox" checked={included[row.id]} onChange={event => onToggle(row, event.target.checked)}/>
+      {t('includeIdea')}</label>}
+  </>;
+}
+
 function ResultCell({ row }) {
-  const { outcomes } = useMethodText();
+  const { t, outcomes } = useMethodText();
   if (row.experiment) return <>
     <p className="method-outcome" data-outcome={row.experiment.outcome}>{outcomes[row.experiment.outcome] || row.experiment.outcome}</p>
     <ExperimentReview experiment={row.experiment}/>
   </>;
-  if (row.effectCheck) return <p className="method-unverified">{row.effectCheck}</p>;
-  return <p className="muted">未记录结果</p>;
+  if (row.effectCheck) return <p className="method-unverified">{effectText(row.effectCheck, t)}</p>;
+  return <p className="muted">{t('unrecordedResult')}</p>;
 }
 
 function LegacyMethodTable({ rows, included, busy, onToggleIncluded, onToggleIdea, onRemove, onSubmit }) {
-  const { fields } = useMethodText();
-  return <section className="meta-method-group" aria-label="尚未提炼元方法">
-    <h3>尚未提炼元方法</h3>
-    <p className="muted">这些记录只有原有字段，仍可查看、编辑和交付。</p>
-    <div className="method-matrix" role="region" tabIndex={0} aria-label="尚未提炼元方法">
+  const { t, fields } = useMethodText();
+  return <section className="meta-method-group" aria-label={t('legacyMethods')}>
+    <h3>{t('legacyMethods')}</h3>
+    <p className="muted">{t('legacyMethodsNote')}</p>
+    <div className="method-matrix" role="region" tabIndex={0} aria-label={t('legacyMethods')}>
       <table>
-        <thead><tr><th scope="col">交付</th><th scope="col">论文版本</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
-          <th scope="col">迁移设想</th><th scope="col">编辑</th></tr></thead>
+        <thead><tr><th scope="col">{t('deliver')}</th><th scope="col">{t('paperVersionColumn')}</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
+          <th scope="col">{t('transferIdea')}</th><th scope="col">{t('editColumn')}</th></tr></thead>
         <tbody>{rows.map(row => <tr key={row.id}>
-          <td><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)}
+          <td><input type="checkbox" aria-label={t('deliverNamed', { name: row.fields.name.text })} checked={Object.hasOwn(included, row.id)}
             onChange={event => onToggleIncluded(row, event.target.checked)}/></td>
           <td><a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
-            {row.relatedId && <p className="muted">有可对照的旧版本</p>}</td>
+            {row.relatedId && <p className="muted">{t('relatedVersion')}</p>}</td>
           {fields.map(([key]) => <td key={key}><FieldValue field={row.fields[key]}/></td>)}
-          <td>{row.idea && <><p>{row.idea}</p>{Object.hasOwn(included, row.id) && <label className="check">
-            <input type="checkbox" checked={included[row.id]} onChange={event => onToggleIdea(row, event.target.checked)}/>一并交付</label>}</>}</td>
+          <td><DeliverIdea row={row} included={included} onToggle={onToggleIdea}/></td>
           <td><RowEditor row={row} disabled={busy} onRemove={() => onRemove(row)} onSubmit={data => onSubmit(row, data)}/></td>
         </tr>)}</tbody>
       </table>
@@ -347,7 +360,7 @@ function MethodEvidence({ row }) {
   const { t } = useLocale();
   const meta = row.metaMethod;
   if (!meta?.structuralProblem || !meta.mechanism || !meta.conditions || !row.practice) return null;
-  const effect = row.effectCheck === storedUnverifiedEffect ? t('unverifiedEffect') : row.effectCheck;
+  const effect = effectText(row.effectCheck, t);
   return <div className="method-fields">
     <section><h4>{t('structuralProblem')}</h4><FieldValue field={meta.structuralProblem}/></section>
     <section><h4>{t('mechanismLabel')}</h4><FieldValue field={meta.mechanism}/></section>

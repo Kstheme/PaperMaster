@@ -1,4 +1,4 @@
-const normalize = value => value.trim().normalize('NFKC').toLowerCase().replace(/\s+/g, ' ');
+import { normalizeKey } from '../server/normalize-key.js';
 
 function metaText(value) {
   return typeof value?.text === 'string' ? value.text : '';
@@ -17,7 +17,7 @@ export function groupMethodRecords(rows) {
       legacy.rows.push(row);
       continue;
     }
-    const key = normalize(structuralProblem) + '\n' + normalize(mechanism);
+    const key = normalizeKey(structuralProblem) + '\n' + normalizeKey(mechanism);
     let group = byKey.get(key);
     if (!group) {
       group = { key, kind: 'meta', structuralProblem: structuralProblem.trim(), mechanism: mechanism.trim(), rows: [] };

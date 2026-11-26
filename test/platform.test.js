@@ -1125,15 +1125,32 @@ test('a highlight annotation stays on its highlight until the reader confirms it
 
 test('a fresh data directory has no preset papers and an existing library still opens', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'papermaster-empty-'));
+  const otherDirectory = await mkdtemp(join(tmpdir(), 'papermaster-empty-other-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 3 }));
+  t.after(() => rm(otherDirectory, { recursive: true, force: true, maxRetries: 3 }));
   let paper;
   const app = await createApp({ directory });
+  const other = await createApp({ directory: otherDirectory });
   try {
     const headers = await sessionHeaders(app);
+    const otherHeaders = await sessionHeaders(other);
     const empty = await (await fetch(app.url + '/api/library', { headers })).json();
     assert.deepEqual(empty.papers, []);
     assert.deepEqual(empty.jobs, []);
+    assert.equal(empty.firstReadingSkipped, false);
     assert.deepEqual(await readdir(join(directory, 'papers')), []);
+
+    const skipped = await fetch(app.url + '/api/settings/first-reading', {
+      method: 'PUT', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ skipped: true }),
+    });
+    assert.equal(skipped.status, 200);
+    assert.deepEqual(await skipped.json(), { skipped: true });
+    assert.equal((await (await fetch(app.url + '/api/library', { headers })).json()).firstReadingSkipped, true);
+    const separate = await (await fetch(other.url + '/api/library', { headers: otherHeaders })).json();
+    assert.equal(separate.firstReadingSkipped, false);
+    assert.deepEqual(separate.papers, []);
+    assert.deepEqual(separate.jobs, []);
 
     const uploaded = await fetch(app.url + '/api/papers?name=owned.pdf', {
       method: 'POST', headers: { ...headers, 'content-type': 'application/pdf' },
@@ -1147,7 +1164,7 @@ test('a fresh data directory has no preset papers and an existing library still 
       body: JSON.stringify({ markdown: '# 主笔记\n\n已有阅读成果应当保留。', revision: current.revision }),
     });
     assert.equal(saved.status, 200);
-  } finally { await app.close(); }
+  } finally { await app.close(); await other.close(); }
 
   const stored = await openLibrary(directory);
   try {
@@ -1163,6 +1180,7 @@ test('a fresh data directory has no preset papers and an existing library still 
   try {
     const headers = await sessionHeaders(reopened);
     const library = await (await fetch(reopened.url + '/api/library', { headers })).json();
+    assert.equal(library.firstReadingSkipped, true);
     assert.equal(library.papers.length, 1);
     assert.equal(library.papers[0].id, paper.id);
     assert.equal(library.papers[0].title, paper.title);
@@ -1174,6 +1192,15 @@ test('a fresh data directory has no preset papers and an existing library still 
     assert.match(note.markdown, /已有阅读成果应当保留/);
     assert.deepEqual((await readdir(join(directory, 'papers'))).filter(name => name !== paper.id), []);
   } finally { await reopened.close(); }
+
+  const otherAgain = await createApp({ directory: otherDirectory });
+  try {
+    const headers = await sessionHeaders(otherAgain);
+    const library = await (await fetch(otherAgain.url + '/api/library', { headers })).json();
+    assert.equal(library.firstReadingSkipped, false);
+    assert.deepEqual(library.papers, []);
+    assert.deepEqual(library.jobs, []);
+  } finally { await otherAgain.close(); }
 });
 
 async function sessionHeaders(app) {

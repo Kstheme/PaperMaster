@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
+import { useLocale } from './locale.jsx';
 
 const phoneQuery = '(max-width: 720px)';
 
@@ -16,6 +17,7 @@ function usePlacement() {
 }
 
 export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onClose, onNote }) {
+  const { t } = useLocale();
   const placement = usePlacement();
   const [text, setText] = useState(highlight.annotation?.text ?? '');
   const [status, setStatus] = useState('');
@@ -31,7 +33,7 @@ export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onC
   useEffect(() => {
     if (text.trim() === saved.current) return undefined;
     const timer = setTimeout(() => {
-      save(text).catch(failure => setError(failure.message || '高亮批注没有保存。'));
+      save(text).catch(failure => setError(failure.message || t('annotationSaveFailed')));
     }, 500);
     return () => clearTimeout(timer);
   }, [text]);
@@ -51,7 +53,7 @@ export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onC
     saved.current = updated.annotation?.text ?? '';
     onChange(updated);
     setError('');
-    setStatus(saved.current ? '已保存' : '已清除批注');
+    setStatus(saved.current ? t('noteSaved') : t('annotationCleared'));
     return Boolean(saved.current);
   }
 
@@ -60,7 +62,7 @@ export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onC
     try {
       if (textRef.current.trim() !== saved.current) await save(textRef.current);
     } catch (failure) {
-      setError(failure.message || '高亮批注没有保存。');
+      setError(failure.message || t('annotationSaveFailed'));
       return;
     }
     onClose();
@@ -74,39 +76,39 @@ export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onC
       const kept = await save(textRef.current);
       if (!kept) {
         setStatus('');
-        setError('请先写下高亮批注。');
+        setError(t('annotationRequired'));
         return;
       }
       await api('jobs/' + jobId + '/highlights/' + highlight.id + '/note', { method: 'POST', json: {} });
-      setStatus('已加入主笔记');
+      setStatus(t('addedToNote'));
       onNote?.();
     } catch (failure) {
-      setError(failure.message || '高亮批注没有加入主笔记。');
+      setError(failure.message || t('annotationNoteFailed'));
     } finally {
       setBusy(false);
     }
   }
 
   return <>
-    {placement === 'sheet' && <button type="button" className="highlight-annotation-backdrop" aria-label="关闭高亮批注" onClick={closePanel}/>}
+    {placement === 'sheet' && <button type="button" className="highlight-annotation-backdrop" aria-label={t('closeAnnotation')} onClick={closePanel}/>}
     <aside id="highlight-annotation" className="highlight-annotation" data-placement={placement}
       role={placement === 'sheet' ? 'dialog' : 'complementary'} aria-labelledby="highlight-annotation-title">
       {placement === 'sheet' && <div className="highlight-annotation-handle" aria-hidden="true"/>}
       <div className="highlight-annotation-header">
-        <h3 id="highlight-annotation-title">高亮批注</h3>
-        <button type="button" onClick={closePanel}>关闭</button>
+        <h3 id="highlight-annotation-title">{t('annotationTitle')}</h3>
+        <button type="button" onClick={closePanel}>{t('close')}</button>
       </div>
-      <p className="muted">写在这处阅读高亮上，确认后才收入主笔记。</p>
-      <p className="muted">原文摘录</p>
+      <p className="muted">{t('annotationHint')}</p>
+      <p className="muted">{t('quoteExcerpt')}</p>
       <blockquote className="highlight-annotation-quote">{highlight.quote}</blockquote>
       <form onSubmit={confirm}>
         <label className="highlight-annotation-field">
-          <textarea ref={area} aria-label="高亮批注" rows={placement === 'sheet' ? 5 : 8} maxLength={8000} value={text} disabled={busy}
-            placeholder="对着这段原文写下批注" onChange={event => { setText(event.target.value); setStatus(''); setError(''); }}/>
+          <textarea ref={area} aria-label={t('annotationTitle')} rows={placement === 'sheet' ? 5 : 8} maxLength={8000} value={text} disabled={busy}
+            placeholder={t('annotationPlaceholder')} onChange={event => { setText(event.target.value); setStatus(''); setError(''); }}/>
         </label>
         <div className="actions">
-          <button type="button" disabled={busy} onClick={() => save(text).catch(failure => setError(failure.message || '高亮批注没有保存。'))}>保存批注</button>
-          {canAppend && <button className="primary" disabled={busy || !text.trim()}>确认加入主笔记</button>}
+          <button type="button" disabled={busy} onClick={() => save(text).catch(failure => setError(failure.message || t('annotationSaveFailed')))}>{t('saveAnnotation')}</button>
+          {canAppend && <button className="primary" disabled={busy || !text.trim()}>{t('confirmAddNote')}</button>}
         </div>
       </form>
       {error && <p className="error" role="alert">{error}</p>}

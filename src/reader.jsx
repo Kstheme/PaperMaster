@@ -33,6 +33,13 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   const incoming = linkedHighlight.current;
   const initialStep = incoming.get('job') === id && incoming.get('chapter') === active.key ? incoming.get('step') : null;
   const { t } = useLocale();
+  const openHighlightLabel = t('openHighlight');
+  const highlightColorLabel = {
+    amber: t('highlightAmber'),
+    green: t('highlightGreen'),
+    blue: t('highlightBlue'),
+    rose: t('highlightRose'),
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -59,7 +66,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   useLayoutEffect(() => {
     const root = bodyRef.current;
     if (!root) return undefined;
-    paintReadingHighlights(root, highlights.filter(item => item.section === active.key));
+    paintReadingHighlights(root, highlights.filter(item => item.section === active.key), openHighlightLabel);
     const token = (annotationId || '') + ':' + active.key;
     if (!annotationId) scrolledAnnotation.current = '';
     else if (scrolledAnnotation.current !== token) {
@@ -70,7 +77,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
       }
     }
     return () => paintReadingHighlights(root, []);
-  }, [highlights, active.key, active.markdown, annotationId]);
+  }, [highlights, active.key, active.markdown, annotationId, openHighlightLabel]);
 
   useEffect(() => {
     const show = () => {
@@ -116,7 +123,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
       setToolbar(null);
       window.getSelection()?.removeAllRanges();
     } catch (error) {
-      setHighlightError(error.message || '阅读高亮没有保存。');
+      setHighlightError(error.message || t('highlightSaveFailed'));
     } finally {
       saving.current = false;
     }
@@ -179,7 +186,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
       setHighlights(items => items.some(item => item.id === saved.id) ? items : [...items, saved]);
       openHighlight(saved);
     } catch (error) {
-      setHighlightError(error.message || '阅读高亮没有保存。');
+      setHighlightError(error.message || t('highlightSaveFailed'));
     } finally {
       saving.current = false;
     }
@@ -211,12 +218,12 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
         {highlightError && <p className="error" role="alert">{highlightError}</p>}
         <Chapter item={active} figures={figures?.[active.key]} repo={repo} initialStep={initialStep} bodyRef={bodyRef} onTool={onTool ? openTool : undefined}
           renderFigure={name => renderFigure(name, onTool ? openTool : undefined)}/>
-        {toolbar && <div className="reading-highlight-toolbar" role="toolbar" aria-label="阅读高亮" style={{ top: toolbar.top, left: toolbar.left }}
+        {toolbar && <div className="reading-highlight-toolbar" role="toolbar" aria-label={t('readingHighlight')} style={{ top: toolbar.top, left: toolbar.left }}
           onPointerDown={event => event.preventDefault()}>
-          <span className="reading-highlight-label">阅读高亮</span>
-          {readingHighlightColors.map(color => <button key={color.id} type="button" data-color={color.id} aria-label={color.label} title={color.label}
+          <span className="reading-highlight-label">{t('readingHighlight')}</span>
+          {readingHighlightColors.map(color => <button key={color.id} type="button" data-color={color.id} aria-label={highlightColorLabel[color.id]} title={highlightColorLabel[color.id]}
             onClick={() => chooseColor(color.id)}/>)}
-          <button type="button" className="reading-highlight-write" onClick={startAnnotation}>写批注</button>
+          <button type="button" className="reading-highlight-write" onClick={startAnnotation}>{t('writeAnnotation')}</button>
         </div>}
         {active.searched && <aside className="repo-reading-evidence">
           <h3>{t('chapterEvidence')}</h3>

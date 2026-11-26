@@ -5,8 +5,10 @@ import { EvidenceLinks } from './workbench-fields.jsx';
 import { Markdown } from './markdown.jsx';
 import { ReadingCard } from './reading-card.jsx';
 import { MotionTabsList, positionHighlight } from './interface-motion.jsx';
+import { useLocale } from './locale.jsx';
 
 export function RepositoryWorkbench({ guide, repo, onTool, initialStep }) {
+  const { t } = useLocale();
   const [view, setView] = useState('sample');
   const [selected, setSelected] = useState(initialStep ?? (guide.demo === 'angle' ? 'measure-angle' : guide.nodes[0].id));
   const [scenario, setScenario] = useState('reflex');
@@ -45,19 +47,19 @@ export function RepositoryWorkbench({ guide, repo, onTool, initialStep }) {
   const followTarget = evidenceStep || current;
   const followCode = followTarget.evidence?.find(item => item.kind === 'code');
   const followup = onTool && <button type="button" onClick={() => onTool([followTarget.title, followTarget.operation].filter(Boolean).join('\n'),
-    { repoId: repo?.id, file: followCode?.file, repositoryStep: followTarget.id })}>追问此步骤</button>;
+    { repoId: repo?.id, file: followCode?.file, repositoryStep: followTarget.id })}>{t('askStep')}</button>;
   return <Tabs.Root value={view} onValueChange={setView}>
-    <ReadingCard className="repository-workbench" label={guide.title} kicker="仓库步骤" title={guide.title}
+    <ReadingCard className="repository-workbench" label={guide.title} kicker={t('repoSteps')} title={guide.title}
       intro={<div className="repository-card-intro">
         {guide.intro && <p>{guide.intro}</p>}
         {repo && <a className="repository-commit" href={repo.url + '/tree/' + repo.commit} target="_blank" rel="noreferrer"
-          title={'固定提交 ' + repo.commit}><GitCommitHorizontal size={16} aria-hidden="true"/>{repo.commit.slice(0, 7)}<ArrowUpRight size={14} aria-hidden="true"/></a>}
+          title={t('pinnedCommit', { commit: repo.commit })}><GitCommitHorizontal size={16} aria-hidden="true"/>{repo.commit.slice(0, 7)}<ArrowUpRight size={14} aria-hidden="true"/></a>}
       </div>}
       actions={<>
-        <MotionTabsList className="repository-views" value={view} aria-label="精读方式">
-          <Tabs.Trigger value="sample">沿样本走</Tabs.Trigger>
-          {canCompare && <Tabs.Trigger value="mapping">公式与代码对照</Tabs.Trigger>}
-          {canPractice && <Tabs.Trigger value="practice">先做验证题</Tabs.Trigger>}
+        <MotionTabsList className="repository-views" value={view} aria-label={t('readingViews')}>
+          <Tabs.Trigger value="sample">{t('followSample')}</Tabs.Trigger>
+          {canCompare && <Tabs.Trigger value="mapping">{t('formulaCode')}</Tabs.Trigger>}
+          {canPractice && <Tabs.Trigger value="practice">{t('practiceFirst')}</Tabs.Trigger>}
         </MotionTabsList>
         {view !== 'practice' && <StepSelector nodes={guide.nodes} current={current} select={selectStep}/>}
       </>}
@@ -71,69 +73,72 @@ export function RepositoryWorkbench({ guide, repo, onTool, initialStep }) {
               {current.concept && <p className="repository-caption">{current.concept}</p>}
               {formula}
               {current.why && <Markdown>{current.why}</Markdown>}
-              <dl className="repository-fields">{[['输入', current.input], ['处理', current.operation], ['输出', current.output]].filter(([, value]) => value)
+              <dl className="repository-fields">{[[t('inputLabel'), current.input], [t('processLabel'), current.operation], [t('outputLabel'), current.output]].filter(([, value]) => value)
                 .map(([label, value]) => <div key={label}><dt>{label}</dt><dd><Markdown>{value}</Markdown></dd></div>)}</dl>
             </div>
           </div>
-          {guide.reuse && <section className="repository-reuse"><h4>可复用做法</h4><Markdown>{guide.reuse}</Markdown></section>}
+          {guide.reuse && <section className="repository-reuse"><h4>{t('reusablePractice')}</h4><Markdown>{guide.reuse}</Markdown></section>}
         </Tabs.Content>
         <Tabs.Content value="mapping" className="repository-view">
           <div key={current.id} className="repository-pane repository-step-entry">
             <div className="repository-comparison">
-              <div><h4>论文</h4>
-                <p>{current.concept || '对应公式或图表待核实'}</p>
+              <div><h4>{t('paperSide')}</h4>
+                <p>{current.concept || t('formulaPending')}</p>
                 {formula}
                 {current.mapping && <Markdown>{current.mapping}</Markdown>}
               </div>
-              <div><h4>代码实现</h4>
+              <div><h4>{t('codeSide')}</h4>
                 <Markdown>{current.operation}</Markdown>
                 {current.snippet && <pre className="file-code">{current.snippet}</pre>}
               </div>
             </div>
           </div>
-          {sample && <details className="repository-demo-details"><summary>用同一个教学样本核对</summary>{sample}</details>}
+          {sample && <details className="repository-demo-details"><summary>{t('checkWithSample')}</summary>{sample}</details>}
         </Tabs.Content>
         {canPractice && <Tabs.Content value="practice" className="repository-view">
           <div className={guide.reuse ? 'repository-pair' : undefined}>
             {guide.demo === 'angle' ? <AngleQuiz angle={angle} scenario={scenario} answer={answer} guess={guess}
               onScenario={chooseScenario} onGuess={setGuess}/>
               : <div className="repository-pane">
-                <p className="repository-caption">教学练习 · {quizStep.title}</p>
+                <p className="repository-caption">{t('teachingExercise', { title: quizStep.title })}</p>
                 <h4>{quizStep.quiz.question}</h4>
                 <QuizOptions options={[...quizStep.quiz.alternatives, quizStep.output].sort()} guess={guess} onGuess={setGuess}/>
                 <div role="status">{guess !== null && <>
-                  <p>{guess === quizStep.output ? '预测正确' : '实现返回：' + quizStep.output}</p>
+                  <p>{guess === quizStep.output ? t('predictionCorrect') : t('implementationReturns', { value: quizStep.output })}</p>
                   <Markdown>{quizStep.quiz.explanation}</Markdown>
                 </>}</div>
               </div>}
-            {guide.reuse && <section className="repository-pane"><h4>可复用做法</h4><Markdown>{guide.reuse}</Markdown></section>}
+            {guide.reuse && <section className="repository-pane"><h4>{t('reusablePractice')}</h4><Markdown>{guide.reuse}</Markdown></section>}
           </div>
         </Tabs.Content>}
       </>}
       evidence={evidenceReady ? <>
         {evidenceItems.length > 0 && <EvidenceLinks items={evidenceItems} compact/>}
-        {showSnippet && <details key={evidenceStep.id}><summary>查看这一步的源码</summary><pre className="file-code">{evidenceStep.snippet}</pre></details>}
-        {evidenceItems.length === 0 && !showSnippet && <p className="muted">这一步还没有可打开的原始证据。</p>}
-      </> : <p className="muted">答完这一步后，可以在这里打开原始证据。</p>}
-      save={followup || <p className="muted">当前阅读不能把这一步写入追问。</p>}/>
+        {showSnippet && <details key={evidenceStep.id}><summary>{t('viewStepSource')}</summary><pre className="file-code">{evidenceStep.snippet}</pre></details>}
+        {evidenceItems.length === 0 && !showSnippet && <p className="muted">{t('noStepEvidence')}</p>}
+      </> : <p className="muted">{t('evidenceAfterAnswer')}</p>}
+      save={followup || <p className="muted">{t('cannotAskStep')}</p>}/>
   </Tabs.Root>;
 }
 
 function StepSelector({ nodes, current, select }) {
-  return <nav className="repository-steps" aria-label="样本步骤">
+  const { t } = useLocale();
+  return <nav className="repository-steps" aria-label={t('sampleSteps')}>
     {nodes.map((node, index) => <button key={node.id} type="button" aria-pressed={current.id === node.id}
       onClick={() => select(node.id)}><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>{node.title}</button>)}
   </nav>;
 }
 
-const scenarios = [['normal', '常规角'], ['reflex', '反角'], ['empty', '无读数']];
+const scenarios = [['normal', 'scenarioNormal'], ['reflex', 'scenarioReflex'], ['empty', 'scenarioEmpty']];
 function Scenarios({ current, choose }) {
-  return <div className="repository-choices" aria-label="教学样本条件">
-    {scenarios.map(([key, label]) => <button type="button" key={key} aria-pressed={current === key} onClick={() => choose(key)}>{label}</button>)}
+  const { t } = useLocale();
+  return <div className="repository-choices" aria-label={t('sampleConditions')}>
+    {scenarios.map(([key, label]) => <button type="button" key={key} aria-pressed={current === key} onClick={() => choose(key)}>{t(label)}</button>)}
   </div>;
 }
 
 function AngleSample({ angle, answer, scenario, onScenario, onAngle }) {
+  const { t } = useLocale();
   const id = useId();
   const canvas = useRef(null);
   useEffect(() => {
@@ -145,16 +150,16 @@ function AngleSample({ angle, answer, scenario, onScenario, onAngle }) {
     return () => resize.disconnect();
   }, [angle, answer]);
   return <div className="repository-pane repository-sample">
-    <div className="repository-readout"><div><h4>教学样本 · ∠ABC</h4><p>模拟读数</p></div>
-      <output><span key={scenario} className="repository-readout-change">{answer === null ? '无读数' : answer + '°'}</span></output></div>
+    <div className="repository-readout"><div><h4>{t('teachingSample')}</h4><p>{t('simulatedReading')}</p></div>
+      <output><span key={scenario} className="repository-readout-change">{answer === null ? t('scenarioEmpty') : answer + '°'}</span></output></div>
     <div className="repository-canvas-frame pointer-highlight" onPointerMove={positionHighlight}>
-      <canvas ref={canvas} className="repository-canvas" role="img" aria-label="量角示意，以 B 为顶点的 BA 和 BC 两条射线"/>
+      <canvas ref={canvas} className="repository-canvas" role="img" aria-label={t('angleAria')}/>
     </div>
-    <div className="repository-readout"><span>引擎角度 · {answer === null ? '空' : angle + '°'}</span>
-      <span>重绘 · {answer === null ? '未触发' : angle > 180 ? '交换 A 与 C' : '沿原顺序'}</span></div>
-    <label htmlFor={id}>旋转射线 BC</label>
+    <div className="repository-readout"><span>{t('engineAngle', { value: answer === null ? t('emptyReading') : angle + '°' })}</span>
+      <span>{t('redrawRule', { value: answer === null ? t('notTriggered') : angle > 180 ? t('swapEnds') : t('originalOrder') })}</span></div>
+    <label htmlFor={id}>{t('rotateRay')}</label>
     <input id={id} type="range" min="1" max="359" value={angle} disabled={answer === null}
-      aria-valuetext={angle + ' 度'} onChange={event => onAngle(Number(event.currentTarget.value))}/>
+      aria-valuetext={t('angleValue', { angle })} onChange={event => onAngle(Number(event.currentTarget.value))}/>
     <Scenarios current={scenario} choose={onScenario}/>
   </div>;
 }
@@ -206,17 +211,18 @@ function QuizOptions({ options, guess, onGuess }) {
 }
 
 function AngleQuiz({ angle, scenario, answer, guess, onScenario, onGuess }) {
+  const { t } = useLocale();
   const expected = answer === null ? 'null' : answer + '°';
   const options = answer === null ? ['0°', 'null', '75°'] : [...new Set([angle + '°', expected, 'null'])];
   return <div className="repository-pane">
-    <h4>先预测工具会返回什么</h4>
+    <h4>{t('predictReturn')}</h4>
     <Scenarios current={scenario} choose={onScenario}/>
-    <p>{answer === null ? '命令成功，但引擎没给读数。模型收到什么值？' : '画布给出 ' + angle + '°，模型最终收到多少度？'}</p>
+    <p>{answer === null ? t('noReadingQuestion') : t('angleQuestion', { angle })}</p>
     <QuizOptions options={options} guess={guess} onGuess={onGuess}/>
     <div role="status">{guess !== null && <>
-      <p>{guess === expected ? '预测正确' : '实现返回：' + expected}</p>
-      <p>{answer === null ? '调用可以成功并携带空读数。' : angle > 180 ? '执行器用 360° 减去反角，并交换端点重画。' : '执行器直接返回转成度数的读数。'}</p>
-      <p className="repository-caption">回包节选 · 教学模拟</p>
+      <p>{guess === expected ? t('predictionCorrect') : t('implementationReturns', { value: expected })}</p>
+      <p>{answer === null ? t('emptySuccess') : angle > 180 ? t('reflexExplain') : t('directReading')}</p>
+      <p className="repository-caption">{t('responseExcerpt')}</p>
       <pre>{JSON.stringify({ success: true, value: answer }, null, 2)}</pre>
     </>}</div>
   </div>;
