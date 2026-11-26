@@ -22,6 +22,7 @@ import { followupService } from './followups.js';
 import { deliveryMarkdown, methodTables } from './method-tables.js';
 import { traceRepository } from './repository-reading.js';
 import { readingRepositoryBlock } from './draw2think-reading.js';
+import { readLanguage, saveLanguage } from './language.js';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const contentTypes = {
@@ -104,7 +105,8 @@ async function route(req, res, url, { library, reader, models, followups, tables
         id, references, mode, status, updated, interactive: Boolean(interaction),
         sections: sections.filter(item => item.markdown).map(({ key, title }) => ({ key, title })),
       })),
-      providers, modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
+      providers, language: readLanguage(library),
+      modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
   }
   if (resource === 'method-tables') {
     if (!id && method === 'GET') return json(res, tables.list());
@@ -188,6 +190,9 @@ async function route(req, res, url, { library, reader, models, followups, tables
       const marker = `<!-- papermaster:${job.id}:${section || 'all'} -->`;
       return json(res, await serialized(() => appendNote(library, id, marker, passage)));
     }
+  }
+  if (resource === 'settings' && id === 'language' && !action && method === 'PUT') {
+    return json(res, saveLanguage(library, await body(req)));
   }
   if (resource === 'connections') {
     if (!id && method === 'POST') return json(res, await models.save(await body(req)), 201);
