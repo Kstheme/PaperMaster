@@ -30,6 +30,7 @@
     "dist",
     "README.zh-CN.md",
     "docs/auto-research-export.md",
+    "docs/images/flow-*.gif",
     "docs/images/repository-workbench.webp",
     "docs/images/visual-scaffolding-skim.gif",
     "docs/images/visual-scaffolding-formula.gif"

@@ -31,11 +31,11 @@ papermaster --data-dir ./my-library --port 43948
 
 ## Tutorial
 
-The first open, the three reading modes, and the path from a passage to a method snapshot are drawn below. The steps after each figure use the labels you see in the app.
+The short animations show how to start a reading, switch modes, save a passage, and export a method snapshot.
 
 ### 1. Open an empty library
 
-![From an empty library to the first reading, or skip into the workbench](docs/images/flow-start.svg)
+![Import a paper, connect a model, and open the first reading](docs/images/flow-start.gif)
 
 A new data directory has no sample paper. The main area says **Start from an empty library**, with three steps: **Import a paper**, **Connect a model**, and **Start reading**.
 
@@ -59,7 +59,7 @@ A connection cannot be deleted while a job that uses it is queued or running. Af
 
 ### 3. Choose how to read
 
-![Skim, deep reading, and repository reading share one card](docs/images/flow-reading.svg)
+![Switch between a skim summary, a formula example, and a repository code excerpt](docs/images/flow-reading.gif)
 
 On the paper's **Read** tab, pick one mode. They do not have to be done in order.
 
@@ -88,7 +88,7 @@ The same cards work in a narrow window. Inputs stack, and buttons stay large eno
 
 ### 5. Keep a passage
 
-![Select, highlight, annotate, then confirm the note](docs/images/flow-keep.svg)
+![Highlight a sentence, write an annotation, and save it with a link to the chapter](docs/images/flow-keep.gif)
 
 In the chapter body, select a sentence. The toolbar offers yellow, green, blue, and pink, plus **Write a note**.
 
@@ -113,7 +113,7 @@ Switching the interface does not rewrite the paper, a finished reading, a saved 
 
 ### 8. Build a method table
 
-![Candidates, a shared mechanism, and one confirmed snapshot](docs/images/flow-method.svg)
+![Compare candidate rows from two papers by mechanism and confirm an export snapshot](docs/images/flow-method.gif)
 
 Open **Method tables**. Create a topic, for example `bounded search`, and optionally say which problem the table is for. Select up to twelve paper versions that already have a reading. **Generate candidates**.
 
