@@ -219,8 +219,12 @@ export function methodTables(library, models, readNote) {
     if (!Array.isArray(input.items) || !input.items.length) throw new AppError('请勾选要交付的方法。');
     const choices = new Map(input.items.map(item => [item?.id, item?.includeIdea === true]));
     if ([...choices.keys()].some(id => !table.rows.some(row => row.id === id))) throw new AppError('所选方法已不存在。');
-    return table.rows.filter(row => choices.has(row.id)).map(({ id, paper, fields, idea, relatedId }) =>
-      ({ id, paper, fields, ...(relatedId && choices.has(relatedId) && { relatedId }), ...(choices.get(id) && idea && { idea }) }));
+    return table.rows.filter(row => choices.has(row.id)).map(row => ({
+      id: row.id, paper: row.paper, fields: row.fields,
+      ...(row.relatedId && choices.has(row.relatedId) && { relatedId: row.relatedId }),
+      ...(choices.get(row.id) && row.idea && { idea: row.idea }),
+      ...evidenceRecord(row),
+    }));
   }
 
   function deliver(id, input) {
@@ -295,10 +299,15 @@ function legacyFields(candidate, context, metaMethod, practice) {
 }
 
 function practiceRecord(candidate) {
+  return evidenceRecord(candidate);
+}
+
+function evidenceRecord(row) {
+  if (!row?.metaMethod || !row.practice) return {};
   return {
-    metaMethod: candidate.metaMethod,
-    practice: candidate.practice,
-    ...(candidate.experiment ? { experiment: candidate.experiment } : { effectCheck: candidate.effectCheck }),
+    metaMethod: row.metaMethod,
+    practice: row.practice,
+    ...(row.experiment ? { experiment: row.experiment } : row.effectCheck ? { effectCheck: row.effectCheck } : {}),
   };
 }
 
@@ -341,18 +350,48 @@ function editedField(key, baseline, change) {
   return { text, state: change.state, evidence };
 }
 
+function fieldMarkdown(label, item) {
+  const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+  return '- **' + label + '** · ' + fieldStates[item.state] + (item.text ? ' · ' + markdownText(item.text).replace(/\n/g, '\n  ') : '') +
+    evidence.map(source => '\n  - ' + evidenceMarkdown(source)).join('');
+}
+
+function evidenceSections(row) {
+  const meta = row.metaMethod;
+  const practice = row.practice;
+  if (!meta?.structuralProblem || !meta.mechanism || !meta.conditions || !practice?.text) return [];
+  const lines = [
+    '### 元方法',
+    fieldMarkdown('结构性问题', meta.structuralProblem),
+    fieldMarkdown('作用机制', meta.mechanism),
+    fieldMarkdown('适用前提', meta.conditions),
+    '### 具体做法',
+    fieldMarkdown('做法', practice),
+  ];
+  const experiment = row.experiment;
+  if (experiment?.metric && experiment.comparison && experiment.data && experiment.result) {
+    lines.push('### 实验结果',
+      fieldMarkdown('指标', experiment.metric),
+      fieldMarkdown('对照', experiment.comparison),
+      fieldMarkdown('数据或条件', experiment.data),
+      fieldMarkdown('结果', experiment.result),
+      '- **结论** · ' + (experimentOutcomes[experiment.outcome] || markdownText(experiment.outcome)));
+  } else if (row.effectCheck) lines.push('### 效果验证', markdownText(row.effectCheck));
+  return lines;
+}
+
 export function deliveryMarkdown(delivery) {
+  const boundary = delivery.rows.some(row => row.metaMethod && row.practice)
+    ? ['本快照固定具体做法、元方法、适用前提、原实验结果与出处，供下游评估迁移。目标任务、结果预测和实验设计由下游完成。'] : [];
   return [
     '# ' + markdownText(delivery.topic),
     '交付快照 · ' + delivery.id + '  \n确认时间 · ' + delivery.confirmedAt,
+    ...boundary,
     ...delivery.rows.map(row => [
       '## ' + markdownText(row.fields.name.text),
       '论文 · ' + evidenceMarkdown(paperLocation(row.paper)),
-      ...Object.entries(methodFields).map(([key, label]) => {
-        const item = row.fields[key];
-        return '- **' + label + '** · ' + fieldStates[item.state] + (item.text ? ' · ' + markdownText(item.text).replace(/\n/g, '\n  ') : '') +
-          item.evidence.map(source => '\n  - ' + evidenceMarkdown(source)).join('');
-      }),
+      ...Object.entries(methodFields).map(([key, label]) => fieldMarkdown(label, row.fields[key])),
+      ...evidenceSections(row),
       ...(row.relatedId ? ['关联版本 · ' + row.relatedId] : []),
       ...(row.idea ? ['**迁移设想**\n\n' + markdownText(row.idea)] : []),
     ].join('\n\n')),

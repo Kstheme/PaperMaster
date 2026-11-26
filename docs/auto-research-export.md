@@ -17,6 +17,12 @@
 | `rows[].fields` | `name`、`problem`、`pipeline`、`conditions` |
 | `rows[].fields.*` | `text` 为内容，`state` 为信息状态，`evidence` 为出处数组 |
 | `rows[].idea` | 用户明确选中交付的迁移设想 |
+| `rows[].metaMethod` | 带元方法的记录才有。`structuralProblem`、`mechanism`、`conditions` 各含 `text`、`state`、`evidence` |
+| `rows[].practice` | 该论文的具体做法。`evidence` 是可回查的出处 |
+| `rows[].experiment` | 原论文报告了效果时才有。`metric`、`comparison`、`data`、`result` 的结构与字段相同，结果出处在 `result.evidence`。`outcome` 为 `effective`（有效）、`no_improvement`（无明显改善）或 `failure`（失败） |
+| `rows[].effectCheck` | 原文只解释机制、没有效果验证时为「原论文未验证效果」。此时没有 `experiment` |
+
+没有 `metaMethod` 的旧快照仍只含上面的方法字段，Markdown 也保持确认时的原内容。新快照里的 Markdown 与 JSON 使用同一次确认写入的记录。快照提供评估迁移所需的做法、元方法、前提、结果和出处；目标任务、结果预测和实验设计由下游完成，不写进快照。
 
 状态 `known` 表示已记录，`pending` 表示待核实，`unreported` 表示论文未说明，`not_applicable` 表示不适用。待核实的字段可能有暂存的文字。迁移设想由读者提供，可作为选题线索。
 
