@@ -19,6 +19,7 @@ import { prepareSource } from './interaction-source.js';
 import { modelServices, providers } from './providers.js';
 import { evidenceMarkdown, markdownText, uuid as idPattern } from './evidence.js';
 import { followupService } from './followups.js';
+import { highlightService } from './highlights.js';
 import { deliveryMarkdown, methodTables } from './method-tables.js';
 import { traceRepository } from './repository-reading.js';
 import { readingRepositoryBlock } from './draw2think-reading.js';
@@ -34,6 +35,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
   const models = modelServices(library, vault, remoteFetch, codex);
   const reader = createReadingService(library, models);
   const followups = followupService(library, models);
+  const highlights = highlightService(library);
   const tables = methodTables(library, models, readNote);
   const shutdown = new AbortController();
   const session = randomBytes(32).toString('hex');
@@ -59,7 +61,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
         return json(res, { token: session });
       }
       if (req.headers['x-papermaster-session'] !== session) throw new AppError('请刷新页面以恢复本地会话。', 403);
-      await route(req, res, url, { library, reader, models, tables, followups, serialized, signal: shutdown.signal });
+      await route(req, res, url, { library, reader, models, tables, followups, highlights, serialized, signal: shutdown.signal });
     } catch (error) {
       if (res.headersSent || res.destroyed) { if (!res.writableEnded) res.destroy(); return; }
       if (error instanceof AppError) json(res, { error: error.message, code: error.code }, error.status);
@@ -88,7 +90,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
   };
 }
 
-async function route(req, res, url, { library, reader, models, followups, tables, serialized, signal }) {
+async function route(req, res, url, { library, reader, models, followups, highlights, tables, serialized, signal }) {
   const parts = url.pathname.slice('/api/'.length).split('/');
   const [resource, id, action, member] = parts;
   const method = req.method;
@@ -233,6 +235,10 @@ async function route(req, res, url, { library, reader, models, followups, tables
       if (action === 'followups' && member && method === 'DELETE') return json(res, followups.remove(id, member));
       if (action === 'followups' && !member && method === 'POST') {
         return json(res, await followups.ask(job, await body(req), signal));
+      }
+      if (action === 'highlights' && !member && method === 'GET') return json(res, highlights.list(id));
+      if (action === 'highlights' && !member && method === 'POST') {
+        return json(res, highlights.create(job, await body(req)), 201);
       }
       if (action === 'followup-note' && member && method === 'POST') {
         const input = await body(req);
