@@ -7,11 +7,8 @@
 .chapter-figure { min-width: 0; container-type: inline-size; margin: 1.5rem 0; }
 .chapter-figure .experiment-table { margin-bottom: .6rem; }
 .reading-sources { margin: 1rem 0; }
-.inline-flow { display: grid; gap: 12px; padding: clamp(12px, 2.4vw, 22px); margin: 0; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 9px; }
-.inline-flow figcaption > h3 { font: 700 clamp(21px, 3vw, 28px)/1.24 var(--display); }
-.inline-flow figcaption .markdown { max-width: 71ch; }
-.inline-flow .module-detail { padding: 11px 13px; background: var(--inset); }
+.inline-flow { margin: 0; }
+.inline-flow .reading-card-header .markdown { max-width: 71ch; }
 .module-source { display: inline-block; overflow-wrap: anywhere; font: 12px/1.5 "Cascadia Mono", Consolas, monospace; }
 .flow-controls button { font-size: 13px; }
 .animated-flow-edge { animation: trace-data-flow 1.2s linear infinite; stroke-linecap: round; }
@@ -33,18 +30,39 @@
 .flow-neighbors span { font-size: 13px; color: var(--muted); }
 .flow-neighbors button { font-size: 13px; flex-wrap: wrap; }
 .flow-neighbors small { color: var(--muted); font-weight: 400; }
-.module-detail, .formula-lab, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
+.module-detail, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
   border-radius: 9px; background: var(--surface); min-width: 0; }
+.reading-card { display: grid; padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
+  border-radius: 9px; background: var(--surface); min-width: 0; container-type: inline-size; }
+.reading-card-header, .reading-card-region, .reading-card-body { min-width: 0; }
+.reading-card-header { display: grid; gap: 8px; }
+.reading-card-header h3, .module-detail h3, .experiment-table h3 { margin-top: 4px; font: 700 clamp(22px, 3vw, 28px)/1.24 var(--display); overflow-wrap: anywhere; }
+.reading-card-region { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.reading-card-body { margin-top: 16px; }
+.reading-card-label { margin: 0; color: var(--accent); font: 650 12px/1.3 "Cascadia Mono", Consolas, monospace; }
+.reading-card-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.reading-card-toolbar .actions { flex: 1 1 180px; }
+.reading-card :is(button, summary) { min-height: 44px; }
+.reading-card .lab-input input[type="number"],
+.reading-card .lab-input input[type="range"] { min-height: 44px; }
+.reading-card .prediction { margin: 0; }
+.reading-card .lab-results { margin-block: 0; }
+.reading-card .lab-note { margin-top: 0; }
+.reading-card .source-preview:last-child { border-bottom: 0; padding-bottom: 0; }
+.reading-card .module-detail { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.reading-card .experiment-controls { margin: 0; }
+.reading-card .experiment-controls select { min-height: 44px; }
+.reading-card .experiment-scroll { margin: 0; }
+.reading-card .figure-question { margin-top: 0; }
+.reading-card-evidence pre, .repository-pane pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .module-detail { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px 28px; }
-.module-detail h3, .formula-lab h3, .experiment-table h3 { margin-top: 4px; font: 700 clamp(22px, 3vw, 28px)/1.24 var(--display); }
 .module-detail dl { display: grid; gap: 3px; margin: 0; }
 .module-detail dl > div { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); }
 .module-detail dl > div:last-child { border-bottom: 0; }
 .module-detail dt { color: var(--accent); font-weight: 650; }
 .module-detail dd { margin: 0; }
 .module-detail dd .markdown > * { margin: 6px 0; }
-.interaction-heading { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; justify-content: space-between; }
-.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); margin: 14px 0; }
+.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); }
 .lab-stage { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: clamp(12px, 2vw, 20px); align-items: start; }
 .lab-visual, .lab-inputs { min-width: 0; }
 .lab-visual { padding: 10px; border: 1px solid var(--line); background: var(--inset); border-radius: 8px; }
@@ -92,11 +110,15 @@
 .source-preview img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); }
 @container (max-width: 540px) {
   .module-detail, .lab-stage { grid-template-columns: minmax(0,1fr); }
+  .reading-card .lab-inputs { order: -1; }
+  .reading-card-toolbar > button { flex: 1 1 100%; justify-content: center; }
+  .reading-card .experiment-controls > label { flex-basis: 100%; }
+  .experiment-compare { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 570px) {
-  .lab-input input[type="range"] { min-height: 32px; }
+  .lab-input input[type="range"] { min-height: 44px; }
 }
-.repository-workbench {
+.reading-card.engineering-card {
   color-scheme: dark;
   --background: var(--studio-background);
   --surface: var(--studio-surface);
@@ -114,19 +136,23 @@
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: 0 12px 28px #2428221c;
-  container-type: inline-size;
   line-height: 1.65;
 }
-.repository-workbench-header {
+.repository-workbench { container-type: inline-size; }
+.repository-card-intro {
   display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px;
-  padding: clamp(16px, 2.5vw, 24px);
-  background: var(--background);
-  border-radius: 15px 15px 0 0;
 }
-.repository-workbench-header > div { flex: 1 1 260px; min-width: 0; }
+.repository-card-intro > p { flex: 1 1 260px; min-width: 0; margin: 0; max-width: 46ch; }
 .repository-workbench h3 { font: 700 clamp(22px, 2.1vw, 31px)/1.25 var(--display); }
 .repository-workbench h4 { font-size: 17px; }
-.repository-workbench-header p { color: var(--muted); margin-top: 8px; max-width: 46ch; font-size: 14px; }
+.reading-card.repository-workbench .repository-views,
+.reading-card.repository-workbench .repository-view { padding-inline: 0; }
+.reading-card.repository-workbench .repository-view { padding-block: 0; }
+.reading-card.repository-workbench .repository-steps { margin-bottom: 0; }
+.reading-card.repository-workbench .evidence-links {
+  flex: 1 1 230px; padding: 0; margin: 0; display: flex; gap: 4px 14px; flex-wrap: wrap; list-style: none;
+}
+.reading-card.repository-workbench .evidence-links a { display: inline-flex; align-items: center; min-height: 32px; overflow-wrap: anywhere; }
 .repository-commit {
   display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; min-height: 44px;
   color: var(--muted); font: 13px "Cascadia Mono", Consolas, monospace;
@@ -162,7 +188,6 @@
 .repository-fields dd, .repository-fields dd p, .repository-readout p { margin: 0; }
 .repository-sample-description { margin-bottom: 10px; }
 .repository-pane summary, .repository-demo-details summary { align-content: center; color: var(--accent); }
-.repository-pane pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .repository-pair pre, .repository-comparison pre { background: var(--background); border-radius: 6px; padding: 10px; font-size: 13px; }
 .repository-sources { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .repository-sources .evidence-links { flex: 1 1 230px; padding: 0; margin: 0; display: flex; gap: 4px 14px; flex-wrap: wrap; list-style: none; }

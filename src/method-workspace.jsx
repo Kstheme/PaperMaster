@@ -1,18 +1,46 @@
 import React, { useEffect, useState } from 'react';
 import { api, download } from './api.js';
+import { groupMethodRecords } from './method-groups.js';
+import { useLocale } from './locale.jsx';
 import { ConnectionPicker, EvidenceLinks, paperMatches, useAction } from './workbench-fields.jsx';
 import { evidenceHref, paperLocation } from '../server/evidence.js';
+import { unverifiedEffect } from '../server/unverified-effect.js';
 
-const labels = { name: '方法名', problem: '解决的问题', pipeline: '方法流程', conditions: '适用条件' };
-const states = { known: '已记录', pending: '待核实', unreported: '论文未说明', not_applicable: '不适用' };
-const fields = Object.entries(labels);
+const fieldKeys = ['name', 'problem', 'pipeline', 'conditions'];
 const identify = paper => paper.title + ' · ' + paper.version;
+
+function effectText(effectCheck, t) {
+  return effectCheck === unverifiedEffect ? t('unverifiedEffect') : effectCheck;
+}
+
+function useMethodText() {
+  const { t } = useLocale();
+  const labels = {
+    name: t('methodName'),
+    problem: t('methodProblem'),
+    pipeline: t('methodPipeline'),
+    conditions: t('methodConditions'),
+  };
+  const states = {
+    known: t('stateKnown'),
+    pending: t('statePending'),
+    unreported: t('stateUnreported'),
+    not_applicable: t('stateNotApplicable'),
+  };
+  const outcomes = {
+    effective: t('outcomeEffective'),
+    no_improvement: t('outcomeNoImprovement'),
+    failure: t('outcomeFailure'),
+  };
+  return { t, labels, states, outcomes, fields: fieldKeys.map(key => [key, labels[key]]) };
+}
 
 export function MethodWorkspace({ library, defaultConnection, onError }) {
   const [list, setList] = useState([]);
   const [table, setTable] = useState(null);
   const [title, setTitle] = useState('');
   const [run, busy] = useAction(onError);
+  const { t } = useLocale();
   useEffect(() => {
     let ignore = false;
     api('method-tables').then(items => {
@@ -29,14 +57,14 @@ export function MethodWorkspace({ library, defaultConnection, onError }) {
     setList(items => [{ id: next.id, title: next.title, count: next.rows.length }, ...items.filter(item => item.id !== next.id)]);
   }
   return <div className="method-workspace">
-    <header className="paper-header"><h1>主题方法表</h1></header>
+    <header className="paper-header"><h1>{t('methodTables')}</h1></header>
     <section className="panel method-switcher">
-      {list.length > 0 && <label>打开方法表<select value={table?.id || ''} onChange={event => {
+      {list.length > 0 && <label>{t('methodOpen')}<select value={table?.id || ''} onChange={event => {
         const id = event.target.value;
         run(async () => setTable(await api('method-tables/' + id)));
       }} disabled={busy}>
-        <option value="" disabled>选择一张方法表</option>
-        {list.map(item => <option key={item.id} value={item.id}>{item.title} · {item.count} 条</option>)}
+        <option value="" disabled>{t('methodChoose')}</option>
+        {list.map(item => <option key={item.id} value={item.id}>{item.title} · {t('methodCount', { count: item.count })}</option>)}
       </select></label>}
       <form className="input-row" onSubmit={event => {
         event.preventDefault();
@@ -45,8 +73,8 @@ export function MethodWorkspace({ library, defaultConnection, onError }) {
           setTitle('');
         });
       }}>
-        <label>新研究主题<input value={title} onChange={event => setTitle(event.target.value)} maxLength={160} required placeholder="例如：几何推理"/></label>
-        <button className="primary" disabled={busy}>创建方法表</button>
+        <label>{t('newTopic')}<input value={title} onChange={event => setTitle(event.target.value)} maxLength={160} required placeholder={t('topicPlaceholder')}/></label>
+        <button className="primary" disabled={busy}>{t('createMethodTable')}</button>
       </form>
     </section>
     {table && <TableEditor key={table.id} table={table} onChange={change} {...{ library, defaultConnection, onError }}/>}
@@ -65,6 +93,8 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
   const [preview, setPreview] = useState(null);
   const [message, setMessage] = useState('');
   const [run, busy] = useAction(onError);
+  const { t, fields, outcomes } = useMethodText();
+  const connectionLabels = { label: t('connection'), placeholder: t('chooseConnection'), localModel: t('localModel') };
   const root = 'method-tables/' + table.id;
   useEffect(() => {
     let ignore = false;
@@ -82,11 +112,11 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       const next = await api(root + '/candidates', { method: 'POST', json: { papers: selected, connectionId: connection, topicScope } });
       setChoices(Object.fromEntries(next.rows.map(row => {
         const match = table.rows.find(item => item.id === row.matchId);
-        const suggested = Object.fromEntries(fields.filter(([key]) => !match?.fields[key].text && row.fields[key].text).map(([key]) => [key, 'adopt']));
+        const suggested = Object.fromEntries(fieldKeys.filter(key => !match?.fields[key].text && row.fields[key].text).map(key => [key, 'adopt']));
         return [row.id, { included: true, targetId: row.matchId || '', relatedId: row.relatedId || '', fields: suggested, carry: [] }];
       })));
       setDraft(next);
-      setMessage(next.rows.length ? '' : '所选论文中没有找到与当前主题直接相关且有原文依据的方法。');
+      setMessage(next.rows.length ? '' : 'methodNone');
     });
   }
   function updateTable(updated) {
@@ -99,15 +129,15 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       updateTable(await api(root + '/apply', { method: 'POST', json: { token: draft.token, items } }));
       setDraft(null);
       setSelected([]);
-      setMessage('已应用所选候选行。');
+      setMessage('methodApplied');
     });
   }
   function previewDelivery() {
     run(async () => {
       const items = Object.entries(included).map(([id, includeIdea]) => ({ id, includeIdea }));
       const request = { items, revision: table.revision };
-      const selected = await api(root + '/delivery-preview', { method: 'POST', json: request });
-      setPreview({ ...selected, request, snapshotId: crypto.randomUUID() });
+      const selectedRows = await api(root + '/delivery-preview', { method: 'POST', json: request });
+      setPreview({ ...selectedRows, request, snapshotId: crypto.randomUUID() });
     });
   }
   function confirmDelivery() {
@@ -116,7 +146,7 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
         json: { ...preview.request, snapshotId: preview.snapshotId, confirmed: true } });
       setDeliveries(items => [saved, ...items.filter(item => item.id !== saved.id)]);
       setPreview(null);
-      setMessage('交付快照已生成，可以选择导出格式。');
+      setMessage('methodDelivered');
     });
   }
   function exportDelivery(snapshot, format) {
@@ -125,19 +155,48 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       download(file, table.title + '-' + snapshot.id.slice(0, 8) + (format === 'markdown' ? '.md' : '.json'));
     });
   }
+  function toggleIncluded(row, checked) {
+    setPreview(null);
+    setIncluded(current => {
+      const next = { ...current };
+      if (checked) next[row.id] = false;
+      else delete next[row.id];
+      return next;
+    });
+  }
+  function toggleIdea(row, checked) {
+    setPreview(null);
+    setIncluded({ ...included, [row.id]: checked });
+  }
+  function removeRow(row) {
+    if (!confirm(t('methodDeleteConfirm', { name: row.fields.name.text }))) return;
+    run(async () => {
+      updateTable(await api(root + '/rows/' + row.id, { method: 'DELETE', json: { revision: table.revision } }));
+      setIncluded(current => { const next = { ...current }; delete next[row.id]; return next; });
+      setDraft(null);
+      setMessage('methodDeleted');
+    });
+  }
+  function submitRow(row, data) {
+    return run(async () => {
+      updateTable(await api(root + '/rows/' + row.id, { method: 'PATCH', json: { ...data, revision: table.revision } }));
+      setMessage('methodRowSaved');
+      return true;
+    });
+  }
 
   return <>
     <section className="panel">
       <h2>{table.title}</h2>
       <form className="settings-form" onSubmit={requestCandidates}>
-        <label>这次要解决的研究问题（可选）
+        <label>{t('topicQuestion')}
           <textarea rows={2} maxLength={1200} value={topicScope} onChange={event => setTopicScope(event.target.value)}
-            placeholder="例如：只找缩小几何搜索范围的方法，排除通用训练技巧和实验基线。"/></label>
+            placeholder={t('topicQuestionPlaceholder')}/></label>
         <div className="input-row">
-          <label>查找论文<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="标题、arXiv ID 或链接"/></label>
-          <ConnectionPicker library={library} value={connection} onChange={setConnection}/>
+          <label>{t('findPaper')}<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('findPaperPlaceholder')}/></label>
+          <ConnectionPicker library={library} value={connection} onChange={setConnection} {...connectionLabels}/>
         </div>
-        <fieldset><legend>选择论文版本</legend>
+        <fieldset><legend>{t('chooseVersions')}</legend>
           <div className="method-paper-list">{library.papers.filter(paper => paperMatches(paper, query)).map(paper =>
             <div key={paper.id}>
               <strong>{paper.title}</strong>
@@ -150,152 +209,248 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
             </div>)}</div>
         </fieldset>
         <div className="actions"><button className="primary" disabled={busy || !selected.length || selected.length > 12 || !connection}>
-          {busy ? '正在处理…' : '生成候选行'}</button><span className="muted">已选 {selected.length} 个版本（最多 12 个）</span></div>
+          {busy ? t('methodBusy') : t('generateCandidates')}</button><span className="muted">{t('versionsSelected', { count: selected.length })}</span></div>
       </form>
     </section>
 
     {!!draft?.rows.length && <section className="panel">
-      <h2>候选预览</h2>
+      <h2>{t('candidatePreview')}</h2>
       {draft.rows.map(candidate => <Candidate key={candidate.id} candidate={candidate} table={table} batch={draft.rows} choice={choices[candidate.id]}
         onChoice={updates => choose(candidate, updates)}/>)}
       <div className="actions"><button className="primary" disabled={busy || !Object.values(choices).some(choice => choice.included)}
-        onClick={applyCandidates}>确认应用</button><button disabled={busy} onClick={() => setDraft(null)}>取消预览</button></div>
+        onClick={applyCandidates}>{t('confirmApply')}</button><button disabled={busy} onClick={() => setDraft(null)}>{t('cancelPreview')}</button></div>
     </section>}
 
     <section className="panel">
       <div className="row-between">
-        <h2>方法对照</h2>
-        <button disabled={busy || Object.keys(included).length === 0} onClick={previewDelivery}>预览交付</button>
+        <h2>{t('methodComparison')}</h2>
+        <button disabled={busy || Object.keys(included).length === 0} onClick={previewDelivery}>{t('previewDelivery')}</button>
       </div>
-      {!table.rows.length && <p className="muted">确认候选后，方法会出现在这里。</p>}
-      {!!table.rows.length && <div className="method-matrix" role="region" tabIndex={0} aria-label="方法对照表">
-        <table>
-          <thead><tr><th scope="col">交付</th><th scope="col">论文版本</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
-            <th scope="col">迁移设想</th><th scope="col">编辑</th></tr></thead>
-          <tbody>{table.rows.map(row => <tr key={row.id}>
-            <td><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)} onChange={event => {
-              setPreview(null);
-              const checked = event.target.checked;
-              setIncluded(current => {
-                const next = { ...current };
-                if (checked) next[row.id] = false;
-                else delete next[row.id];
-                return next;
-              });
-            }}/></td>
-            <td><a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
-              {row.relatedId && <p className="muted">有可对照的旧版本</p>}</td>
-            {fields.map(([key]) => <td key={key}><FieldValue field={row.fields[key]}/></td>)}
-            <td>{row.idea && <><p>{row.idea}</p>{Object.hasOwn(included, row.id) && <label className="check">
-              <input type="checkbox" checked={included[row.id]} onChange={event => {
-                setPreview(null);
-                setIncluded({ ...included, [row.id]: event.target.checked });
-              }}/>一并交付</label>}</>}</td>
-            <td><RowEditor row={row} disabled={busy} onRemove={() => {
-              if (!confirm('从方法表删除「' + row.fields.name.text + '」？已确认的交付快照会保留。')) return;
-              run(async () => {
-                updateTable(await api(root + '/rows/' + row.id, { method: 'DELETE', json: { revision: table.revision } }));
-                setIncluded(current => { const next = { ...current }; delete next[row.id]; return next; });
-                setDraft(null);
-                setMessage('已从当前方法表删除该方法。');
-              });
-            }} onSubmit={data => run(async () => {
-              updateTable(await api(root + '/rows/' + row.id, { method: 'PATCH', json: { ...data, revision: table.revision } }));
-              setMessage('已保存方法行。');
-              return true;
-            })}/></td>
-          </tr>)}</tbody>
-        </table>
-      </div>}
-      {message && <p role="status" className="message">{message}</p>}
+      {!table.rows.length && <p className="muted">{t('methodsAppearHere')}</p>}
+      {groupMethodRecords(table.rows).map((group, index) => group.kind === 'meta'
+        ? <MetaMethodGroup key={group.key} group={group} headingId={'method-group-' + index} included={included} busy={busy}
+          onToggleIncluded={toggleIncluded} onToggleIdea={toggleIdea} onRemove={removeRow} onSubmit={submitRow}/>
+        : <LegacyMethodTable key="legacy" rows={group.rows} included={included} busy={busy}
+          onToggleIncluded={toggleIncluded} onToggleIdea={toggleIdea} onRemove={removeRow} onSubmit={submitRow}/>)}
+      {message && <p role="status" className="message">{t(message)}</p>}
     </section>
 
-    {preview && <section className="panel">
-      <h2>确认交付 · {preview.rows.length} 条</h2>
+    {preview && <section className="panel" aria-label={t('confirmDelivery')}>
+      <h2>{t('confirmDeliveryCount', { count: preview.rows.length })}</h2>
+      <p className="muted">{t('deliverySameSnapshot')}</p>
+      {preview.rows.some(row => row.metaMethod && row.practice) && <p className="muted">{t('deliveryBoundary')}</p>}
       {preview.rows.map(row => <details key={row.id} open className="method-option">
-        <summary>{row.fields.name.text} · {identify(row.paper)}</summary>
+        <summary>{row.fields.name.text} · {identify(row.paper)}{row.experiment ? ' · ' + (outcomes[row.experiment.outcome] || row.experiment.outcome) : ''}{row.effectCheck && !row.experiment ? ' · ' + effectText(row.effectCheck, t) : ''}</summary>
+        <MethodEvidence row={row}/>
         <dl>{fields.map(([key, label]) => <div key={key}><dt>{label}</dt><dd><FieldValue field={row.fields[key]}/></dd></div>)}</dl>
-        {row.idea && <p>迁移设想 · {row.idea}</p>}
+        {row.idea && <p>{t('ideaLine', { idea: row.idea })}</p>}
       </details>)}
-      <div className="actions"><button className="primary" disabled={busy} onClick={confirmDelivery}>确认交付</button>
-        <button disabled={busy} onClick={() => setPreview(null)}>取消</button></div>
+      <div className="actions"><button className="primary" disabled={busy} onClick={confirmDelivery}>{t('confirmDelivery')}</button>
+        <button disabled={busy} onClick={() => setPreview(null)}>{t('cancel')}</button></div>
     </section>}
 
     {!!deliveries.length && <section className="panel">
-      <h2>交付快照</h2>
+      <h2>{t('deliverySnapshots')}</h2>
       {deliveries.map(item => <div className="row-between snapshot" key={item.id}>
-        <div><strong>{new Date(item.confirmedAt).toLocaleString()}</strong><p className="muted">{item.id.slice(0, 8)} · {item.count ?? item.rows.length} 条</p></div>
-        <div className="actions"><button disabled={busy} onClick={() => exportDelivery(item, 'markdown')}>笔记导出</button>
-          <button disabled={busy} onClick={() => exportDelivery(item, 'json')}>Auto Research 导出</button></div>
+        <div><strong>{new Date(item.confirmedAt).toLocaleString()}</strong><p className="muted">{item.id.slice(0, 8)} · {t('methodCount', { count: item.count ?? item.rows.length })}</p></div>
+        <div className="actions"><button disabled={busy} onClick={() => exportDelivery(item, 'markdown')}>{t('exportNote')}</button>
+          <button disabled={busy} onClick={() => exportDelivery(item, 'json')}>{t('exportAutoResearch')}</button></div>
       </div>)}
     </section>}
   </>;
 }
 
+function MetaMethodGroup({ group, headingId, included, busy, onToggleIncluded, onToggleIdea, onRemove, onSubmit }) {
+  const { t } = useLocale();
+  return <section className="meta-method-group" aria-labelledby={headingId}>
+    <h3 id={headingId}>{t('metaMethod')}</h3>
+    <dl className="meta-method-summary">
+      <div><dt>{t('structuralProblem')}</dt><dd>{group.structuralProblem}</dd></div>
+      <div><dt>{t('mechanismLabel')}</dt><dd>{group.mechanism}</dd></div>
+    </dl>
+    <div className="method-compare" role="region" tabIndex={0} aria-label={t('metaMethodCompare', { mechanism: group.mechanism })}>
+      <table>
+        <thead><tr>
+          <th scope="col">{t('comparison')}</th>
+          {group.rows.map(row => <th key={row.id} scope="col">{row.fields.name.text}</th>)}
+        </tr></thead>
+        <tbody>
+          <tr>
+            <th scope="row">{t('concretePractice')}</th>
+            {group.rows.map(row => <td key={row.id}>{row.practice ? <FieldValue field={row.practice}/> : <p className="muted">{t('unrecorded')}</p>}</td>)}
+          </tr>
+          <tr>
+            <th scope="row">{t('conditionsLabel')}</th>
+            {group.rows.map(row => <td key={row.id}>{row.metaMethod.conditions ? <FieldValue field={row.metaMethod.conditions}/> : <p className="muted">{t('unrecorded')}</p>}</td>)}
+          </tr>
+          <tr>
+            <th scope="row">{t('resultLabel')}</th>
+            {group.rows.map(row => <td key={row.id}><ResultCell row={row}/></td>)}
+          </tr>
+          <tr>
+            <th scope="row">{t('sourceColumn')}</th>
+            {group.rows.map(row => <td key={row.id}>
+              <a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
+              {row.relatedId && <p className="muted">{t('relatedVersion')}</p>}
+            </td>)}
+          </tr>
+          <tr>
+            <th scope="row">{t('transferIdea')}</th>
+            {group.rows.map(row => <td key={row.id}><DeliverIdea row={row} included={included} onToggle={onToggleIdea}/></td>)}
+          </tr>
+          <tr>
+            <th scope="row">{t('deliver')}</th>
+            {group.rows.map(row => <td key={row.id}>
+              <label className="check"><input type="checkbox" aria-label={t('deliverNamed', { name: row.fields.name.text })} checked={Object.hasOwn(included, row.id)}
+                onChange={event => onToggleIncluded(row, event.target.checked)}/>{t('selectForDelivery')}</label>
+              <RowEditor row={row} disabled={busy} onRemove={() => onRemove(row)} onSubmit={data => onSubmit(row, data)}/>
+            </td>)}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>;
+}
+
+function DeliverIdea({ row, included, onToggle }) {
+  const { t } = useLocale();
+  if (!row.idea) return null;
+  return <>
+    <p>{row.idea}</p>
+    {Object.hasOwn(included, row.id) && <label className="check">
+      <input type="checkbox" checked={included[row.id]} onChange={event => onToggle(row, event.target.checked)}/>
+      {t('includeIdea')}</label>}
+  </>;
+}
+
+function ResultCell({ row }) {
+  const { t, outcomes } = useMethodText();
+  if (row.experiment) return <>
+    <p className="method-outcome" data-outcome={row.experiment.outcome}>{outcomes[row.experiment.outcome] || row.experiment.outcome}</p>
+    <ExperimentReview experiment={row.experiment}/>
+  </>;
+  if (row.effectCheck) return <p className="method-unverified">{effectText(row.effectCheck, t)}</p>;
+  return <p className="muted">{t('unrecordedResult')}</p>;
+}
+
+function LegacyMethodTable({ rows, included, busy, onToggleIncluded, onToggleIdea, onRemove, onSubmit }) {
+  const { t, fields } = useMethodText();
+  return <section className="meta-method-group" aria-label={t('legacyMethods')}>
+    <h3>{t('legacyMethods')}</h3>
+    <p className="muted">{t('legacyMethodsNote')}</p>
+    <div className="method-matrix" role="region" tabIndex={0} aria-label={t('legacyMethods')}>
+      <table>
+        <thead><tr><th scope="col">{t('deliver')}</th><th scope="col">{t('paperVersionColumn')}</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
+          <th scope="col">{t('transferIdea')}</th><th scope="col">{t('editColumn')}</th></tr></thead>
+        <tbody>{rows.map(row => <tr key={row.id}>
+          <td><input type="checkbox" aria-label={t('deliverNamed', { name: row.fields.name.text })} checked={Object.hasOwn(included, row.id)}
+            onChange={event => onToggleIncluded(row, event.target.checked)}/></td>
+          <td><a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
+            {row.relatedId && <p className="muted">{t('relatedVersion')}</p>}</td>
+          {fields.map(([key]) => <td key={key}><FieldValue field={row.fields[key]}/></td>)}
+          <td><DeliverIdea row={row} included={included} onToggle={onToggleIdea}/></td>
+          <td><RowEditor row={row} disabled={busy} onRemove={() => onRemove(row)} onSubmit={data => onSubmit(row, data)}/></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </section>;
+}
+
+function MethodEvidence({ row }) {
+  const { t } = useLocale();
+  const meta = row.metaMethod;
+  if (!meta?.structuralProblem || !meta.mechanism || !meta.conditions || !row.practice) return null;
+  const effect = effectText(row.effectCheck, t);
+  return <div className="method-fields">
+    <section><h4>{t('structuralProblem')}</h4><FieldValue field={meta.structuralProblem}/></section>
+    <section><h4>{t('mechanismLabel')}</h4><FieldValue field={meta.mechanism}/></section>
+    <section><h4>{t('conditionsLabel')}</h4><FieldValue field={meta.conditions}/></section>
+    <section><h4>{t('concretePractice')}</h4><FieldValue field={row.practice}/></section>
+    {row.experiment && <section><h4>{t('experimentRecord')}</h4><ExperimentReview experiment={row.experiment}/></section>}
+    {row.effectCheck && !row.experiment && <section><h4>{t('effectCheck')}</h4><p>{effect}</p></section>}
+  </div>;
+}
+
+function ExperimentReview({ experiment }) {
+  const { t, outcomes } = useMethodText();
+  return <dl>
+    <div><dt>{t('metric')}</dt><dd><FieldValue field={experiment.metric}/></dd></div>
+    <div><dt>{t('comparison')}</dt><dd><FieldValue field={experiment.comparison}/></dd></div>
+    <div><dt>{t('dataOrConditions')}</dt><dd><FieldValue field={experiment.data}/></dd></div>
+    <div><dt>{t('resultLabel')}</dt><dd><FieldValue field={experiment.result}/></dd></div>
+    <div><dt>{t('outcome')}</dt><dd>{outcomes[experiment.outcome] || experiment.outcome}</dd></div>
+  </dl>;
+}
+
 function FieldValue({ field }) {
+  const { states } = useMethodText();
   return <>{field.text && <p className="method-cell-text">{field.text}</p>}
     {field.state !== 'known' && <small className="muted">{states[field.state]}</small>}
     <EvidenceLinks items={field.evidence}/></>;
 }
 
 function FieldEdit({ label, value, onChange, baseline }) {
+  const { t, states } = useMethodText();
   return <div className="method-field">
     <label>{label}<textarea rows={2} maxLength={1600} value={value.text} onChange={event => onChange({ ...value, text: event.target.value })}/></label>
-    <label>证据状态<select value={value.state} onChange={event => onChange({ ...value, state: event.target.value })}>
+    <label>{t('evidenceState')}<select value={value.state} onChange={event => onChange({ ...value, state: event.target.value })}>
       {Object.entries(states).map(([key, name]) => <option value={key} key={key}>{name}</option>)}</select></label>
     {!!baseline.evidence.length && value.text !== baseline.text && <label className="check">
       <input type="checkbox" checked={value.keepEvidence === true} onChange={event => onChange({ ...value, keepEvidence: event.target.checked })}/>
-      我已核实，保留现有出处</label>}
+      {t('keepExistingSources')}</label>}
   </div>;
 }
 
 function Candidate({ candidate, table, batch, choice, onChoice }) {
+  const { t, fields } = useMethodText();
   const same = table.rows.filter(row => row.paper.paperId === candidate.paper.paperId && row.paper.versionId === candidate.paper.versionId);
   const versions = [...table.rows, ...batch.filter(row => !row.matchId)].filter(row => row.paper.paperId === candidate.paper.paperId &&
     row.paper.versionId !== candidate.paper.versionId);
   const target = same.find(row => row.id === choice.targetId);
   const related = versions.find(row => row.id === choice.relatedId);
   return <details className="method-option" open>
-    <summary>{candidate.fields.name.text} · {identify(candidate.paper)} · {target ? '建议更新' : related ? '关联版本' : '新增候选'}</summary>
-    <p>与本主题的关系 · {candidate.topicReason}</p>
+    <summary>{candidate.fields.name.text} · {identify(candidate.paper)} · {target ? t('methodSuggestUpdate') : related ? t('methodRelatedVersion') : t('methodNewCandidate')}</summary>
+    <p>{t('topicRelation', { reason: candidate.topicReason })}</p>
     <EvidenceLinks items={candidate.topicEvidence}/>
-    <label className="check"><input type="checkbox" checked={choice.included} onChange={event => onChoice({ included: event.target.checked })}/>应用此候选</label>
-    {!!same.length && <label>更新到<select value={choice.targetId} onChange={event => onChoice({ targetId: event.target.value, fields: {} })}>
-      <option value="">新增方法行</option>{same.map(row => <option key={row.id} value={row.id}>{row.fields.name.text}</option>)}</select></label>}
-    {!target && !!versions.length && <label>与另一论文版本关联<select value={choice.relatedId} onChange={event => onChoice({ relatedId: event.target.value, carry: [] })}>
-      <option value="">独立方法</option>{versions.map(row => <option key={row.id} value={row.id}>{row.fields.name.text} · {row.paper.version}</option>)}</select></label>}
+    <MethodEvidence row={candidate}/>
+    <label className="check"><input type="checkbox" checked={choice.included} onChange={event => onChoice({ included: event.target.checked })}/>{t('applyCandidate')}</label>
+    {!!same.length && <label>{t('updateInto')}<select value={choice.targetId} onChange={event => onChoice({ targetId: event.target.value, fields: {} })}>
+      <option value="">{t('newMethodRow')}</option>{same.map(row => <option key={row.id} value={row.id}>{row.fields.name.text}</option>)}</select></label>}
+    {!target && !!versions.length && <label>{t('linkVersion')}<select value={choice.relatedId} onChange={event => onChoice({ relatedId: event.target.value, carry: [] })}>
+      <option value="">{t('independentMethod')}</option>{versions.map(row => <option key={row.id} value={row.id}>{row.fields.name.text} · {row.paper.version}</option>)}</select></label>}
     <div className="method-fields">{fields.map(([key, label]) => {
       const baseline = target?.fields[key];
       const change = choice.fields[key];
       return <section key={key}>
         <h4>{label}</h4>
-        {baseline && <div className="field-diff"><div><small>当前</small><FieldValue field={baseline}/></div>
-          <div><small>建议</small><FieldValue field={candidate.fields[key]}/></div></div>}
+        {baseline && <div className="field-diff"><div><small>{t('currentValue')}</small><FieldValue field={baseline}/></div>
+          <div><small>{t('suggestedValue')}</small><FieldValue field={candidate.fields[key]}/></div></div>}
         {!baseline && <FieldValue field={candidate.fields[key]}/>}
-        {baseline && <label>处理方式<select value={typeof change === 'object' ? 'edit' : change || 'keep'} onChange={event => {
+        {baseline && <label>{t('changeAction')}<select value={typeof change === 'object' ? 'edit' : change || 'keep'} onChange={event => {
           const value = event.target.value;
           onChoice({ fields: { ...choice.fields, [key]: value === 'edit' ? { ...baseline } : value } });
-        }}><option value="keep">保留当前</option><option value="adopt">采用建议</option><option value="edit">手动改写</option></select></label>}
-        {baseline && typeof change === 'object' && <FieldEdit label={'改写' + label} value={change} baseline={baseline}
+        }}><option value="keep">{t('keepCurrent')}</option><option value="adopt">{t('adoptSuggestion')}</option><option value="edit">{t('editManually')}</option></select></label>}
+        {baseline && typeof change === 'object' && <FieldEdit label={t('rewriteField', { label })} value={change} baseline={baseline}
           onChange={next => onChoice({ fields: { ...choice.fields, [key]: next } })}/>}
         {related && !target && table.rows.includes(related) && key !== 'name' && related.fields[key].text && <label className="check"><input type="checkbox"
           checked={choice.carry.includes(key)} onChange={event => onChoice({ carry: event.target.checked ? [...choice.carry, key] : choice.carry.filter(item => item !== key) })}/>
-          带入旧版文字并标为待核实</label>}
+          {t('carryPending')}</label>}
       </section>;
     })}</div>
-    {candidate.idea && <p>迁移设想 · {candidate.idea}</p>}
+    {candidate.idea && <p>{t('ideaLine', { idea: candidate.idea })}</p>}
     {target && candidate.idea && <label className="check"><input type="checkbox" checked={choice.adoptIdea === true}
-      onChange={event => onChoice({ adoptIdea: event.target.checked })}/>采用候选迁移设想</label>}
+      onChange={event => onChoice({ adoptIdea: event.target.checked })}/>{t('adoptTransferIdea')}</label>}
   </details>;
 }
 
 function RowEditor({ row, disabled, onSubmit, onRemove }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(null);
+  const { t, fields } = useMethodText();
   return <>
     <div className="actions">
-      <button disabled={disabled} onClick={() => { setDraft({ fields: row.fields, idea: row.idea }); setEditing(true); }}>编辑</button>
-      <button disabled={disabled} onClick={onRemove}>删除</button>
+      <button disabled={disabled} onClick={() => { setDraft({ fields: row.fields, idea: row.idea }); setEditing(true); }}>{t('edit')}</button>
+      <button disabled={disabled} onClick={onRemove}>{t('delete')}</button>
     </div>
     {editing && <form className="method-row-editor" onSubmit={async event => {
       event.preventDefault();
@@ -303,9 +458,9 @@ function RowEditor({ row, disabled, onSubmit, onRemove }) {
     }}>
       {fields.map(([key, label]) => <FieldEdit key={key} label={label} value={draft.fields[key]} baseline={row.fields[key]}
         onChange={value => setDraft({ ...draft, fields: { ...draft.fields, [key]: value } })}/>)}
-      <label>迁移设想<textarea rows={2} maxLength={1200} value={draft.idea} onChange={event => setDraft({ ...draft, idea: event.target.value })}/></label>
-      <div className="actions"><button className="primary" disabled={disabled}>保存</button>
-        <button type="button" disabled={disabled} onClick={() => setEditing(false)}>取消</button></div>
+      <label>{t('transferIdea')}<textarea rows={2} maxLength={1200} value={draft.idea} onChange={event => setDraft({ ...draft, idea: event.target.value })}/></label>
+      <div className="actions"><button className="primary" disabled={disabled}>{t('save')}</button>
+        <button type="button" disabled={disabled} onClick={() => setEditing(false)}>{t('cancel')}</button></div>
     </form>}
   </>;
 }

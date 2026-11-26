@@ -1,23 +1,133 @@
-import React, { lazy, Suspense, useRef, useState } from 'react';
+import React, { lazy, Suspense, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { ArrowLeft, ArrowRight, BookmarkPlus } from 'lucide-react';
 import { Sample } from './illustrations.jsx';
 import { Markdown } from './markdown.jsx';
+import { api } from './api.js';
 import { EffortInfo, EvidenceLinks } from './workbench-fields.jsx';
 import { RepositoryReading } from './interaction-reader.jsx';
+import { readingHighlightColors } from '../server/highlight-anchor.js';
+import { paintReadingHighlights, selectionAnchor, selectionBox } from './reading-highlights.js';
+import { HighlightAnnotation } from './highlight-annotation.jsx';
 import { readingFigureParts, splitReadingMarkdown } from '../server/reading-markdown.js';
+import { useLocale } from './locale.jsx';
 
 const Softmax = lazy(() => import('./softmax.jsx'));
 
-export function Reader({ id, sections, onAppend, busy, figures, renderFigure, onTool, repo }) {
+export function Reader({ id, sections, onAppend, busy, figures, renderFigure, onTool, repo, onNote, canAppendNote = false }) {
   const storageKey = 'papermaster.chapter.' + id;
   const [selected, setSelected] = useState(() => localStorage.getItem(storageKey));
   const activeIndex = Math.max(0, sections.findIndex(item => item.key === selected));
   const active = sections[activeIndex];
   const heading = useRef(null);
   const article = useRef(null);
-  const incoming = new URLSearchParams(window.location.search);
+  const bodyRef = useRef(null);
+  const saving = useRef(false);
+  const [highlights, setHighlights] = useState([]);
+  const [toolbar, setToolbar] = useState(null);
+  const [highlightError, setHighlightError] = useState('');
+  const [annotationId, setAnnotationId] = useState(null);
+  const linkedHighlight = useRef(new URLSearchParams(window.location.search));
+  const appliedLink = useRef(false);
+  const scrolledAnnotation = useRef('');
+  const incoming = linkedHighlight.current;
   const initialStep = incoming.get('job') === id && incoming.get('chapter') === active.key ? incoming.get('step') : null;
+  const { t } = useLocale();
+  const openHighlightLabel = t('openHighlight');
+  const highlightColorLabel = {
+    amber: t('highlightAmber'),
+    green: t('highlightGreen'),
+    blue: t('highlightBlue'),
+    rose: t('highlightRose'),
+  };
+
+  useEffect(() => {
+    let ignore = false;
+    api('jobs/' + id + '/highlights').then(items => {
+      if (!ignore) setHighlights(items);
+    }).catch(error => { if (!ignore) setHighlightError(error.message); });
+    return () => { ignore = true; };
+  }, [id]);
+
+  useEffect(() => {
+    const linkedJob = incoming.get('job');
+    const linkedId = linkedJob === id ? incoming.get('highlight') : '';
+    if (!linkedId || appliedLink.current) return;
+    const item = highlights.find(entry => entry.id === linkedId);
+    if (!item) return;
+    appliedLink.current = true;
+    if (item.section !== active.key) {
+      setSelected(item.section);
+      localStorage.setItem(storageKey, item.section);
+    }
+    setAnnotationId(item.id);
+  }, [highlights, active.key, id, incoming, storageKey]);
+
+  useLayoutEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return undefined;
+    paintReadingHighlights(root, highlights.filter(item => item.section === active.key), openHighlightLabel);
+    const token = (annotationId || '') + ':' + active.key;
+    if (!annotationId) scrolledAnnotation.current = '';
+    else if (scrolledAnnotation.current !== token) {
+      const mark = root.querySelector(`mark.reading-highlight[data-highlight-id="${CSS.escape(annotationId)}"]`);
+      if (mark) {
+        mark.scrollIntoView({ block: 'nearest' });
+        scrolledAnnotation.current = token;
+      }
+    }
+    return () => paintReadingHighlights(root, []);
+  }, [highlights, active.key, active.markdown, annotationId, openHighlightLabel]);
+
+  useEffect(() => {
+    const show = () => {
+      if (saving.current) return;
+      const anchor = selectionAnchor(bodyRef.current);
+      const box = anchor && selectionBox();
+      if (!anchor || !box) {
+        setToolbar(current => current ? null : current);
+        return;
+      }
+      setToolbar(current => current && current.anchor.start === anchor.start && current.anchor.end === anchor.end
+        && current.anchor.quote === anchor.quote && current.top === box.top && current.left === box.left
+        ? current : { anchor, ...box });
+    };
+    const onPointerUp = event => {
+      if (event.target instanceof Element && event.target.closest('.reading-highlight-toolbar')) return;
+      show();
+    };
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('keyup', show);
+    document.addEventListener('selectionchange', show);
+    window.addEventListener('scroll', show, true);
+    window.addEventListener('resize', show);
+    return () => {
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('keyup', show);
+      document.removeEventListener('selectionchange', show);
+      window.removeEventListener('scroll', show, true);
+      window.removeEventListener('resize', show);
+    };
+  }, [active.key]);
+
+  async function chooseColor(color) {
+    const anchor = toolbar?.anchor;
+    if (!anchor || saving.current) return;
+    saving.current = true;
+    setHighlightError('');
+    try {
+      const saved = await api('jobs/' + id + '/highlights', {
+        method: 'POST', json: { section: active.key, color, ...anchor },
+      });
+      setHighlights(items => items.some(item => item.id === saved.id) ? items : [...items, saved]);
+      setToolbar(null);
+      window.getSelection()?.removeAllRanges();
+    } catch (error) {
+      setHighlightError(error.message || t('highlightSaveFailed'));
+    } finally {
+      saving.current = false;
+    }
+  }
 
   function openTool(text, context) {
     const selection = window.getSelection();
@@ -29,6 +139,75 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   function select(key) {
     setSelected(key);
     localStorage.setItem(storageKey, key);
+    setAnnotationId(current => {
+      const item = highlights.find(entry => entry.id === current);
+      return item && item.section === key ? current : null;
+    });
+  }
+
+  function rememberHighlight(saved) {
+    setHighlights(items => items.map(item => item.id === saved.id ? saved : item));
+  }
+
+  async function deleteHighlight(item) {
+    if (!item || saving.current) return;
+    if (!confirm(t('deleteHighlightConfirm'))) return;
+    saving.current = true;
+    setHighlightError('');
+    try {
+      await api('jobs/' + id + '/highlights/' + item.id, { method: 'DELETE' });
+      setHighlights(items => items.filter(entry => entry.id !== item.id));
+      setAnnotationId(current => current === item.id ? null : current);
+      setToolbar(null);
+      window.getSelection()?.removeAllRanges();
+    } catch (error) {
+      setHighlightError(error.message || t('highlightSaveFailed'));
+    } finally {
+      saving.current = false;
+    }
+  }
+
+  function openHighlight(item) {
+    if (!item || item.section !== active.key) return;
+    setToolbar(null);
+    window.getSelection()?.removeAllRanges();
+    setAnnotationId(item.id);
+  }
+
+  function openFromMark(event) {
+    const mark = event.target instanceof Element ? event.target.closest('mark.reading-highlight') : null;
+    if (!mark || !article.current?.contains(mark)) return;
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.type === 'click') {
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+    } else event.preventDefault();
+    const item = highlights.find(entry => entry.id === mark.dataset.highlightId);
+    openHighlight(item);
+  }
+
+  async function startAnnotation() {
+    const anchor = toolbar?.anchor;
+    if (!anchor || saving.current) return;
+    const existing = highlights.find(item => item.section === active.key && item.start === anchor.start
+      && item.end === anchor.end && item.quote === anchor.quote);
+    if (existing) {
+      openHighlight(existing);
+      return;
+    }
+    saving.current = true;
+    setHighlightError('');
+    try {
+      const saved = await api('jobs/' + id + '/highlights', {
+        method: 'POST', json: { section: active.key, color: 'amber', ...anchor },
+      });
+      setHighlights(items => items.some(item => item.id === saved.id) ? items : [...items, saved]);
+      openHighlight(saved);
+    } catch (error) {
+      setHighlightError(error.message || t('highlightSaveFailed'));
+    } finally {
+      saving.current = false;
+    }
   }
 
   function turnPage(index) {
@@ -36,67 +215,88 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
     requestAnimationFrame(() => heading.current?.focus());
   }
 
-  return <Tabs.Root className={figures ? 'reader reader-inline' : 'reader'} value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
-    {sections.length > 1 && <nav className="reader-index" aria-label="阅读目录">
-      <h3>阅读目录</h3>
-      <Tabs.List className="chapter-tabs" aria-label="选择章节">
+  const annotation = highlights.find(item => item.id === annotationId && item.section === active.key) || null;
+  const toolbarHighlight = toolbar && highlights.find(item => item.section === active.key && item.start === toolbar.anchor.start
+    && item.end === toolbar.anchor.end && item.quote === toolbar.anchor.quote);
+  return <Tabs.Root className={['reader', figures ? 'reader-inline' : '', annotation ? 'reader-with-annotation' : ''].filter(Boolean).join(' ')} value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
+    {sections.length > 1 && <nav className="reader-index" aria-label={t('readerIndex')}>
+      <h3>{t('readerIndex')}</h3>
+      <Tabs.List className="chapter-tabs" aria-label={t('chooseChapter')}>
         {sections.map(item => <Tabs.Trigger key={item.key} value={item.key}>{item.title}</Tabs.Trigger>)}
       </Tabs.List>
     </nav>}
     <Tabs.Content key={active.key} value={active.key} className="reader-content" asChild>
-      <article ref={article}>
+      <article ref={article} onClick={openFromMark} onKeyDown={openFromMark}>
         <div className="chapter-header">
-          <div><h2 ref={heading} tabIndex={-1}>{active.title}</h2><EffortInfo entry={active}/></div>
+          <div><h2 ref={heading} tabIndex={-1}>{active.title}</h2><EffortInfo entry={active} localize/>
+            {active.model && <p className="muted">模型 · {active.model}</p>}</div>
           <div className="actions">
-            {onTool && <button onMouseDown={event => event.preventDefault()} onClick={() => openTool()}>就此追问</button>}
-            {onAppend && <button disabled={busy} onClick={() => onAppend(active.key)}><BookmarkPlus size={15}/>加入笔记</button>}
+            {onTool && <button onMouseDown={event => event.preventDefault()} onClick={() => openTool()}>{t('askHere')}</button>}
+            {onAppend && <button disabled={busy} onClick={() => onAppend(active.key)}><BookmarkPlus size={15}/>{t('addToNote')}</button>}
           </div>
         </div>
-        <Chapter item={active} figures={figures?.[active.key]} repo={repo} initialStep={initialStep} onTool={onTool ? openTool : undefined}
+        {highlightError && <p className="error" role="alert">{highlightError}</p>}
+        <Chapter item={active} figures={figures?.[active.key]} repo={repo} initialStep={initialStep} bodyRef={bodyRef} onTool={onTool ? openTool : undefined}
           renderFigure={name => renderFigure(name, onTool ? openTool : undefined)}/>
+        {toolbar && <div className="reading-highlight-toolbar" role="toolbar" aria-label={t('readingHighlight')} style={{ top: toolbar.top, left: toolbar.left }}
+          onPointerDown={event => event.preventDefault()}>
+          <span className="reading-highlight-label">{t('readingHighlight')}</span>
+          {readingHighlightColors.map(color => <button key={color.id} type="button" data-color={color.id} aria-label={highlightColorLabel[color.id]} title={highlightColorLabel[color.id]}
+            onClick={() => chooseColor(color.id)}/>)}
+          <button type="button" className="reading-highlight-write" onClick={startAnnotation}>{t('writeAnnotation')}</button>
+          {toolbarHighlight && <button type="button" className="reading-highlight-write" onClick={() => deleteHighlight(toolbarHighlight)}>{t('deleteHighlight')}</button>}
+        </div>}
         {active.searched && <aside className="repo-reading-evidence">
-          <h3>本章证据</h3>
-          {active.evidence?.length ? <EvidenceLinks items={active.evidence}/> : <p className="muted">暂无可定位的证据，涉及实现的结论待核实。</p>}
-          <details><summary>查阅了哪些文件</summary><ul>{active.searched.map(file => <li key={file}><code>{file}</code></li>)}</ul></details>
+          <h3>{t('chapterEvidence')}</h3>
+          {active.evidence?.length ? <EvidenceLinks items={active.evidence}/> : <p className="muted">{t('noEvidence')}</p>}
+          <details><summary>{t('filesConsulted')}</summary><ul>{active.searched.map(file => <li key={file}><code>{file}</code></li>)}</ul></details>
         </aside>}
-        {sections.length > 1 && <nav className="chapter-pagination" aria-label="相邻章节">
+        {sections.length > 1 && <nav className="chapter-pagination" aria-label={t('adjacentChapters')}>
           {activeIndex > 0 && <button onClick={() => turnPage(activeIndex - 1)}><ArrowLeft size={15}/>{sections[activeIndex - 1].title}</button>}
           {activeIndex < sections.length - 1 && <button onClick={() => turnPage(activeIndex + 1)}>{sections[activeIndex + 1].title}<ArrowRight size={15}/></button>}
         </nav>}
       </article>
     </Tabs.Content>
+    {annotation && <HighlightAnnotation key={annotation.id} jobId={id} highlight={annotation} canAppend={canAppendNote}
+      onChange={rememberHighlight} onClose={() => setAnnotationId(null)} onNote={onNote} onDeleteHighlight={deleteHighlight}/>}
   </Tabs.Root>;
 }
 
-function Chapter({ item, figures, renderFigure, repo, onTool, initialStep }) {
+const ChapterMarkdown = memo(function ChapterMarkdown({ children }) {
+  return <Markdown chapter>{children}</Markdown>;
+});
+
+function Chapter({ item, figures, renderFigure, repo, onTool, initialStep, bodyRef }) {
+  const { t } = useLocale();
   const sample = !figures?.length && Boolean(item.sample?.length);
   const softmax = !figures?.length && item.simulation === 'softmax';
   const { before, after } = splitReadingMarkdown(item.markdown, sample || softmax);
   const keys = [...(figures || []), ...(item.repository ? [item.repository.key] : [])];
   return <>
     {item.summary && <div className="chapter-summary"><Markdown>{item.summary}</Markdown></div>}
-    {!!item.takeaways?.length && <aside className="takeaways" aria-label="本章要点">
-      <h3>本章要点</h3>
+    {!!item.takeaways?.length && <aside className="takeaways" aria-label={t('takeaways')}>
+      <h3>{t('takeaways')}</h3>
       <ul>{item.takeaways.map((point, index) => <li key={index}><Markdown>{point}</Markdown></li>)}</ul>
     </aside>}
-    <div className="chapter-body">
+    <div className="chapter-body" ref={bodyRef}>
       {readingFigureParts(before, keys).map((part, index) => part.key
         ? <React.Fragment key={part.key}>{part.key === item.repository?.key
           ? <RepositoryReading block={item.repository} repo={repo} onTool={onTool} initialStep={initialStep}/> : renderFigure(part.key)}</React.Fragment>
-        : <Markdown chapter key={index}>{part.markdown}</Markdown>)}
+        : <ChapterMarkdown key={index}>{part.markdown}</ChapterMarkdown>)}
       {sample && softmax ? <Tabs.Root className="chapter-demo" defaultValue="formula">
-        <Tabs.List className="demo-tabs" aria-label="交互示例">
-          <Tabs.Trigger value="formula">公式演算</Tabs.Trigger>
-          <Tabs.Trigger value="sample">样本追踪</Tabs.Trigger>
+        <Tabs.List className="demo-tabs" aria-label={t('demoTabs')}>
+          <Tabs.Trigger value="formula">{t('formulaDemo')}</Tabs.Trigger>
+          <Tabs.Trigger value="sample">{t('sampleTrace')}</Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="formula"><Formula/></Tabs.Content>
         <Tabs.Content value="sample"><Sample steps={item.sample}/></Tabs.Content>
       </Tabs.Root> : sample ? <Sample steps={item.sample}/> : softmax ? <Formula/> : null}
-      {after && readingFigureParts(after).map((part, index) => <Markdown chapter key={index}>{part.markdown}</Markdown>)}
+      {after && readingFigureParts(after).map((part, index) => <ChapterMarkdown key={'after-' + index}>{part.markdown}</ChapterMarkdown>)}
     </div>
   </>;
 }
 
 function Formula() {
-  return <Suspense fallback={<p className="visual-loading muted" role="status">正在加载公式演算…</p>}><Softmax/></Suspense>;
+  const { t } = useLocale();
+  return <Suspense fallback={<p className="visual-loading muted" role="status">{t('loadingFormula')}</p>}><Softmax/></Suspense>;
 }

@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createApp } from '../server/http.js';
+import { locateHighlight } from '../server/highlight-anchor.js';
 import { openLibrary } from '../server/library.js';
 import { arxivLink, githubLink } from '../server/import.js';
+import { groupMethodRecords } from '../src/method-groups.js';
 
 // Build a minimal text PDF (or a page containing only a graphic) without committing fixtures.
 function pdf(title, text) {
@@ -86,6 +88,19 @@ test('confirmed reading decisions flow from a pinned source to a matching immuta
         const saved = Object.keys(content.savedCode)[0];
         output = { rows: [{
           relevance: { kind: 'direct', reason: '用几何候选生成限定几何推理的搜索范围', evidence: [{ kind: 'paper', page: 1, quote }] },
+          metaMethod: {
+            structuralProblem: { text: '几何搜索范围需要先被限定', state: 'known' },
+            mechanism: { text: '先生成有界候选再筛选', state: 'known' },
+            conditions: { text: '输入有界且候选可以被核验', state: 'known' },
+          },
+          practice: { text: '几何例子中的有界候选生成', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+          experiment: {
+            metric: { text: '分数', state: 'known' },
+            comparison: { text: 'Method A 对照 Method B', state: 'known' },
+            data: { text: 'Table 1 主实验', state: 'known' },
+            result: { text: 'Method A 得 21 分', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+            outcome: 'effective',
+          },
           fields: {
             name: { text: '有界候选生成', state: 'known' },
             problem: { text: '如何找出候选', state: 'known' },
@@ -237,6 +252,10 @@ test('confirmed reading decisions flow from a pinned source to a matching immuta
   assert.equal(firstCandidate.idea, '迁移到新任务');
   const one = await call(root + '/apply', { token: draft.token, items: [{ id: firstCandidate.id }] });
   const row = one.rows[0];
+  assert.equal(row.metaMethod.mechanism.text, '先生成有界候选再筛选');
+  assert.equal(row.practice.text, '几何例子中的有界候选生成');
+  assert.equal(row.experiment.outcome, 'effective');
+  assert.equal(row.topicReason, undefined);
   const edited = await call(root + '/rows/' + row.id, { revision: one.revision,
     fields: { conditions: { text: '手工确认条件', state: 'known' } } }, 200, 'PATCH');
   const snapshotId = randomUUID();
@@ -266,10 +285,19 @@ test('confirmed reading decisions flow from a pinned source to a matching immuta
   app = undefined;
   token = await start();
   const stored = await call(jobPath + '/followups');
-  assert.equal(stored[0].turns.length, 2);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].id, threadId);
+  assert.deepEqual(stored[0].turns.map(turn => turn.question), ['第一问', '第二问']);
+  assert.match(stored[0].turns[0].answer, /解释：使用有界输入/);
   await call(jobPath + '/followups/' + threadId, undefined, 200, 'DELETE');
   assert.deepEqual(await call(jobPath + '/followups'), []);
-  assert.match((await call('papers/' + paper.id + '/note')).markdown, /解释：使用有界输入/);
+  await app.close();
+  app = undefined;
+  token = await start();
+  assert.deepEqual(await call(jobPath + '/followups'), [], '删除后刷新不再列出这段追问');
+  const kept = await call('papers/' + paper.id + '/note');
+  assert.match(kept.markdown, /解释：使用有界输入/);
+  assert.doesNotMatch(kept.markdown, /不要加入笔记/);
   const repoReading = await call('jobs', { mode: 'repo', papers: refs, connectionId: full.id, repoId: repo.id }, 202);
   const combined = await poll(repoReading.id);
   assert.equal(combined.status, 'completed');
@@ -307,8 +335,21 @@ test('confirmed reading decisions flow from a pinned source to a matching immuta
   const jsonExport = await call(root + '/download/' + snapshotId);
   const markdown = await call(root + '/download/' + snapshotId + '?format=markdown');
   assert.deepEqual(jsonExport, confirmed);
+  assert.equal(jsonExport.rows[0].practice.text, '几何例子中的有界候选生成');
+  assert.equal(jsonExport.rows[0].metaMethod.mechanism.text, '先生成有界候选再筛选');
+  assert.equal(jsonExport.rows[0].metaMethod.conditions.text, '输入有界且候选可以被核验');
+  assert.equal(jsonExport.rows[0].experiment.result.text, 'Method A 得 21 分');
+  assert.equal(jsonExport.rows[0].experiment.result.evidence[0].page, 1);
+  assert.equal(jsonExport.rows[0].experiment.outcome, 'effective');
+  assert.equal(jsonExport.targetTask, undefined);
+  assert.equal(jsonExport.prediction, undefined);
   assert.match(markdown, /手工确认条件/);
   assert.match(markdown, /src\/infer\.py/);
+  assert.match(markdown, /几何例子中的有界候选生成/);
+  assert.match(markdown, /先生成有界候选再筛选/);
+  assert.match(markdown, /输入有界且候选可以被核验/);
+  assert.match(markdown, /Method A 得 21 分/);
+  assert.match(markdown, /供下游评估迁移/);
   assert.match(markdown, new RegExp(snapshotId));
   assert.doesNotMatch(markdown, /编辑后的条件|迁移到新任务/);
 });
@@ -574,6 +615,1043 @@ test('startup recovers an active job as interrupted', async t => {
     assert.equal(job.planned.length, 4);
     assert.equal(job.sections[0].markdown, '已保存');
   } finally { await app.close(); }
+});
+
+test('meta-method candidates keep one evidence record for each practice', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-meta-method-'));
+  let app;
+  t.after(async () => { await app?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const prompts = [];
+  const mechanism = '先用局部约束生成有界候选，再做廉价验证';
+  const conditions = '候选可由局部约束枚举，且逐个验证的代价低';
+  const structuralProblem = '组合搜索空间过大，穷举不可行';
+  const codex = {
+    models: async () => [{ id: 'full', label: 'Full', efforts: ['low'], defaultEffort: 'low', isDefault: true }],
+    async generate({ model, prompt }) {
+      prompts.push(prompt);
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      const page = content.pages?.map(item => item.text).join('\n') || '';
+      let output = { rows: [] };
+      if (prompt.startsWith('任务：PaperMaster 主题方法表提炼')) {
+        if (page.includes('insufficient material')) output = { rows: [] };
+        else if (page.includes('KEYWORD OVERLAP ONLY')) output = { rows: [practiceRow({
+          name: '标题关键词索引', practice: '只按标题关键词收集论文',
+          quote: 'Keyword overlap does not share a mechanism with the topic.',
+          mechanism: '按标题关键词检索论文', conditions: '只要标题共享关键词',
+        })] };
+        else if (page.includes('UNSOURCED CLAIM')) output = { rows: [practiceRow({
+          name: '缺少出处的做法', practice: '声称使用了有界候选但正文没有这句话',
+          quote: 'not written in this paper', mechanism, conditions,
+        })] };
+        else if (page.includes('GRASP GENERATION')) output = { rows: [practiceRow({
+          name: '有界抓取生成', practice: '机械臂先生成有界抓取候选再排序',
+          quote: 'Grasp generation proposes a bounded set and then ranks it.',
+          mechanism, conditions, outcome: 'effective',
+          result: '成功率从 21 升到 42', resultQuote: 'Success rate rises from 21 to 42 against exhaustive search.',
+        })] };
+        else if (page.includes('CONTACT RANKING')) output = { rows: [
+          practiceRow({
+            name: '接触排序无明显改善', practice: '蛋白质接触图沿用有界候选后与更强基线持平',
+            quote: 'No clear gain remains after the stronger baseline.',
+            mechanism, conditions, outcome: 'no_improvement',
+            result: '与更强基线相比没有明显提升', resultQuote: 'No clear gain remains after the stronger baseline.',
+          }),
+          practiceRow({
+            name: '接触条件失败', practice: '放宽局部约束后有界候选验证失败',
+            quote: 'The altered condition fails and lowers the contact score.',
+            mechanism, conditions, outcome: 'failure',
+            result: '放松约束后接触分数下降', resultQuote: 'The altered condition fails and lowers the contact score.',
+          }),
+        ] };
+        else if (page.includes('UNMEASURED MECHANISM')) output = { rows: [practiceRow({
+          name: '未测量的有界提议', practice: '只解释有界提议如何缩小搜索',
+          quote: 'The mechanism explains bounded proposal without a measured effect.',
+          mechanism, conditions,
+        })] };
+      } else if (prompt.startsWith('任务：PaperMaster 主题相关性复核')) {
+        output = { decisions: content.items.map(item => ({ id: item.id, direct: item.mechanism === mechanism && item.conditions === conditions &&
+          item.structuralProblem === structuralProblem })) };
+      }
+      return { text: JSON.stringify(output), model };
+    },
+  };
+  function practiceRow({ name, practice, quote, mechanism: methodMechanism, conditions: methodConditions, outcome, result, resultQuote }) {
+    const source = text => [{ kind: 'paper', page: 1, quote: text }];
+    return {
+      relevance: { kind: 'direct', reason: '结构性问题、作用机制和适用前提与主题匹配', evidence: source(quote) },
+      metaMethod: {
+        structuralProblem: { text: structuralProblem, state: 'known' },
+        mechanism: { text: methodMechanism, state: 'known' },
+        conditions: { text: methodConditions, state: 'known' },
+      },
+      practice: { text: practice, state: 'known', evidence: source(quote) },
+      ...(outcome ? { experiment: {
+        metric: { text: '成功率', state: 'known' },
+        comparison: { text: '对照无界穷举或更强基线', state: 'known' },
+        data: { text: '固定预算的合成数据', state: 'known' },
+        result: { text: result, state: 'known', evidence: source(resultQuote) },
+        outcome,
+      } } : { experiment: null }),
+      fields: {
+        name: { text: name, state: 'known' },
+        problem: { text: structuralProblem, state: 'known' },
+        pipeline: { text: methodMechanism, state: 'known' },
+        conditions: { text: methodConditions, state: 'known' },
+      },
+    };
+  }
+  app = await createApp({ directory, codex });
+  const { token } = await (await fetch(app.url + '/api/session')).json();
+  async function call(path, input, status = 200, method = input === undefined ? 'GET' : 'POST') {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(input !== undefined && { 'content-type': 'application/json' }) },
+      ...(input !== undefined && { body: JSON.stringify(input) }) });
+    const result = response.headers.get('content-type').includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+  async function upload(name, title, ...sentences) {
+    const text = [...sentences, 'Method details continue in the appendix with additional constraints and parameters for the reported procedure.'].join('\n');
+    const response = await fetch(app.url + '/api/papers?name=' + name, { method: 'POST',
+      headers: { 'X-PaperMaster-Session': token, 'content-type': 'application/pdf' }, body: pdf(title, text) });
+    assert.equal(response.status, 201, title);
+    const paper = await response.json();
+    assert.equal(paper.title, title);
+    return paper;
+  }
+  const grasp = await upload('grasp.pdf', 'Robot Grasp',
+    'GRASP GENERATION',
+    'Bounded candidates reduce search before any domain score.',
+    'Local constraints enumerate candidates and the check stays cheap.',
+    'Grasp generation proposes a bounded set and then ranks it.',
+    'Success rate rises from 21 to 42 against exhaustive search.');
+  const keyword = await upload('keyword.pdf', 'Keyword Index',
+    'KEYWORD OVERLAP ONLY',
+    'Keyword overlap does not share a mechanism with the topic.',
+    'The title keyword index only lists matching words.');
+  const insufficient = await upload('empty.pdf', 'Insufficient Note',
+    'This paper has insufficient material for a method claim today.');
+  const unsourced = await upload('unsourced.pdf', 'Unsourced Claim',
+    'UNSOURCED CLAIM',
+    'The structural account is present in the source note.');
+  const protein = await upload('protein.pdf', 'Protein Contacts',
+    'CONTACT RANKING',
+    'Contact ranking keeps the same bounded proposal mechanism.',
+    'No clear gain remains after the stronger baseline.',
+    'The altered condition fails and lowers the contact score.');
+  const theory = await upload('theory.pdf', 'Theory Sketch',
+    'UNMEASURED MECHANISM',
+    'The mechanism explains bounded proposal without a measured effect.',
+    'Conditions require enumerable local constraints.');
+  const table = await call('method-tables', { title: '有界搜索' }, 201);
+  const root = 'method-tables/' + table.id;
+  const oldId = randomUUID();
+  const snapshotId = randomUUID();
+  const version = grasp.versions[0];
+  const oldRow = {
+    id: oldId,
+    paper: { paperId: grasp.id, versionId: version.id, title: grasp.title, version: version.name },
+    fields: {
+      name: { text: '旧方法', state: 'known', evidence: [] },
+      problem: { text: '旧问题', state: 'known', evidence: [] },
+      pipeline: { text: '旧流程', state: 'known', evidence: [] },
+      conditions: { text: '旧条件', state: 'known', evidence: [] },
+    },
+    idea: '旧设想',
+  };
+  const library = await openLibrary(directory);
+  try {
+    library.put('methodTables', { ...table, rows: [oldRow] });
+    library.put('deliveries', { id: snapshotId, tableId: table.id, schemaVersion: 1, topic: table.title,
+      confirmedAt: '2020-01-01T00:00:00.000Z', rows: [{ id: oldRow.id, paper: oldRow.paper, fields: oldRow.fields, idea: oldRow.idea }] });
+  } finally { library.close(); }
+  const ref = paper => ({ id: paper.id, versionId: paper.versions[0].id });
+  const topicScope = '缩小组合搜索空间。机制是先用局部约束生成有界候选，再做廉价验证。前提是候选可被局部约束枚举且验证代价低。不限应用领域。';
+  const connection = await call('connections', { provider: 'codex', model: 'full' }, 201);
+  const draft = await call(root + '/candidates', { connectionId: connection.id, papers: [grasp, keyword, protein, theory].map(ref), topicScope });
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /元方法/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /结构性问题/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /跨领域/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /仅共享关键词/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /原论文未验证效果/);
+  const reviewPrompt = prompts.find(item => item.startsWith('任务：PaperMaster 主题相关性复核'));
+  assert.match(reviewPrompt, /作用机制和适用前提/);
+  assert.match(reviewPrompt, /另一个领域/);
+  assert.match(reviewPrompt, /仅共享关键词/);
+  assert.match(reviewPrompt, /按标题关键词检索论文/);
+  assert.match(reviewPrompt, /Robot Grasp/);
+  assert.deepEqual(draft.rows.map(row => row.fields.name.text).sort(), ['有界抓取生成', '接触排序无明显改善', '接触条件失败', '未测量的有界提议'].sort());
+  assert.equal(draft.rows.some(row => row.fields.name.text === '标题关键词索引'), false);
+  const graspCandidate = draft.rows.find(row => row.paper.title === 'Robot Grasp');
+  assert.equal(graspCandidate.metaMethod.structuralProblem.text, structuralProblem);
+  assert.equal(graspCandidate.metaMethod.mechanism.text, mechanism);
+  assert.equal(graspCandidate.metaMethod.conditions.text, conditions);
+  assert.equal(graspCandidate.practice.evidence[0].kind, 'paper');
+  assert.equal(graspCandidate.practice.evidence[0].page, 1);
+  assert.equal(graspCandidate.experiment.outcome, 'effective');
+  assert.equal(graspCandidate.experiment.metric.text, '成功率');
+  assert.equal(graspCandidate.experiment.comparison.text, '对照无界穷举或更强基线');
+  assert.equal(graspCandidate.experiment.data.text, '固定预算的合成数据');
+  assert.equal(graspCandidate.experiment.result.evidence[0].page, 1);
+  const proteinCandidates = draft.rows.filter(row => row.paper.title === 'Protein Contacts');
+  assert.equal(proteinCandidates.length, 2);
+  assert.equal(new Set(proteinCandidates.map(row => row.id)).size, 2);
+  assert.notEqual(proteinCandidates[0].practice.text, proteinCandidates[1].practice.text);
+  assert.deepEqual(proteinCandidates.map(row => row.experiment.outcome).sort(), ['failure', 'no_improvement']);
+  assert.equal(proteinCandidates[0].metaMethod.mechanism.text, proteinCandidates[1].metaMethod.mechanism.text);
+  const unmeasured = draft.rows.find(row => row.paper.title === 'Theory Sketch');
+  assert.equal(unmeasured.effectCheck, '原论文未验证效果');
+  assert.equal(unmeasured.experiment, undefined);
+  const applied = await call(root + '/apply', { token: draft.token, items: draft.rows.map(row => ({ id: row.id })) });
+  const saved = await call(root);
+  assert.equal(saved.revision, applied.revision);
+  assert.equal(saved.rows.length, 5);
+  const legacy = saved.rows.find(row => row.id === oldId);
+  assert.equal(legacy.fields.problem.text, '旧问题');
+  assert.equal(legacy.fields.pipeline.text, '旧流程');
+  assert.equal(legacy.fields.conditions.text, '旧条件');
+  assert.equal(legacy.idea, '旧设想');
+  assert.equal(legacy.metaMethod, undefined);
+  const storedGrasp = saved.rows.find(row => row.id === graspCandidate.id);
+  assert.equal(storedGrasp.topicReason, undefined);
+  assert.deepEqual(storedGrasp.metaMethod, graspCandidate.metaMethod);
+  assert.deepEqual(storedGrasp.practice, graspCandidate.practice);
+  assert.deepEqual(storedGrasp.experiment, graspCandidate.experiment);
+  const storedProtein = saved.rows.filter(row => row.paper.title === 'Protein Contacts');
+  assert.deepEqual(storedProtein.map(row => row.practice.text).sort(), proteinCandidates.map(row => row.practice.text).sort());
+  assert.equal(saved.rows.find(row => row.id === unmeasured.id).effectCheck, '原论文未验证效果');
+  const patched = await call(root + '/rows/' + oldId, { revision: saved.revision,
+    fields: { conditions: { text: '旧条件仍可改', state: 'known' } } }, 200, 'PATCH');
+  assert.equal(patched.rows.find(row => row.id === oldId).fields.conditions.text, '旧条件仍可改');
+  assert.equal(patched.rows.find(row => row.id === oldId).metaMethod, undefined);
+  assert.equal(patched.rows.find(row => row.id === storedGrasp.id).metaMethod.mechanism.text, mechanism);
+  const groups = groupMethodRecords(saved.rows);
+  assert.deepEqual(groups.map(group => group.kind), ['meta', 'legacy']);
+  assert.equal(groups[0].mechanism, mechanism);
+  assert.equal(groups[0].structuralProblem, structuralProblem);
+  assert.equal(groups[0].rows.length, 4);
+  assert.deepEqual(groups[0].rows.map(row => row.paper.title).sort(), ['Protein Contacts', 'Protein Contacts', 'Robot Grasp', 'Theory Sketch']);
+  const grouped = Object.fromEntries(groups[0].rows.map(row => [row.practice.text, row]));
+  assert.equal(grouped['机械臂先生成有界抓取候选再排序'].experiment.outcome, 'effective');
+  assert.equal(grouped['蛋白质接触图沿用有界候选后与更强基线持平'].experiment.outcome, 'no_improvement');
+  assert.equal(grouped['放宽局部约束后有界候选验证失败'].experiment.outcome, 'failure');
+  assert.equal(grouped['只解释有界提议如何缩小搜索'].effectCheck, '原论文未验证效果');
+  assert.equal(grouped['只解释有界提议如何缩小搜索'].experiment, undefined);
+  for (const row of groups[0].rows) {
+    assert.notEqual(row.practice.text, '');
+    assert.equal(row.practice.evidence[0].kind, 'paper');
+    assert.equal(row.metaMethod.conditions.text, conditions);
+    assert.equal(row.paper.title.length > 0, true);
+    assert.notEqual(row.paper.versionId, undefined);
+  }
+  assert.equal(new Set(groups[0].rows.map(row => row.id)).size, 4);
+  assert.equal(new Set(groups[0].rows.map(row => row.practice.text)).size, 4);
+  assert.equal(groups[1].rows[0].id, oldId);
+  assert.equal(groups[1].rows[0].metaMethod, undefined);
+  assert.equal(groups[1].rows[0].fields.name.text, '旧方法');
+  assert.equal(groups[1].rows[0].fields.conditions.text, '旧条件');
+  const markdown = await call(root + '/download/' + snapshotId + '?format=markdown');
+  const snapshot = await call(root + '/download/' + snapshotId);
+  assert.match(markdown, /旧方法/);
+  assert.match(markdown, /旧条件/);
+  assert.doesNotMatch(markdown, /旧条件仍可改|有界抓取生成/);
+  assert.doesNotMatch(markdown, /元方法|具体做法|供下游评估迁移/);
+  assert.equal(snapshot.rows.length, 1);
+  assert.equal(snapshot.rows[0].fields.conditions.text, '旧条件');
+  assert.equal(snapshot.rows[0].metaMethod, undefined);
+  assert.equal(snapshot.schemaVersion, 1);
+  const evidenceRows = patched.rows.filter(row => row.metaMethod);
+  const selection = { revision: patched.revision, items: evidenceRows.map(row => ({ id: row.id, includeIdea: false })) };
+  const evidencePreview = await call(root + '/delivery-preview', selection);
+  assert.equal(evidencePreview.rows.length, 4);
+  assert.deepEqual(evidencePreview.rows.map(row => row.id), evidenceRows.map(row => row.id));
+  const previewGrasp = evidencePreview.rows.find(row => row.id === storedGrasp.id);
+  assert.equal(previewGrasp.practice.text, '机械臂先生成有界抓取候选再排序');
+  assert.equal(previewGrasp.practice.evidence[0].page, 1);
+  assert.equal(previewGrasp.practice.evidence[0].title, 'Robot Grasp');
+  assert.equal(previewGrasp.metaMethod.conditions.text, conditions);
+  assert.equal(previewGrasp.experiment.metric.text, '成功率');
+  assert.equal(previewGrasp.experiment.comparison.text, '对照无界穷举或更强基线');
+  assert.equal(previewGrasp.experiment.data.text, '固定预算的合成数据');
+  assert.equal(previewGrasp.experiment.result.evidence[0].page, 1);
+  assert.equal(previewGrasp.topicReason, undefined);
+  assert.equal(previewGrasp.matchId, undefined);
+  const previewProtein = evidencePreview.rows.filter(row => row.paper.title === 'Protein Contacts');
+  assert.deepEqual(previewProtein.map(row => row.experiment.outcome).sort(), ['failure', 'no_improvement']);
+  const previewTheory = evidencePreview.rows.find(row => row.id === unmeasured.id);
+  assert.equal(previewTheory.effectCheck, '原论文未验证效果');
+  assert.equal(previewTheory.experiment, undefined);
+  const evidenceSnapshotId = randomUUID();
+  const evidenceConfirmed = await call(root + '/deliveries', { ...selection, snapshotId: evidenceSnapshotId, confirmed: true }, 201);
+  assert.deepEqual(evidenceConfirmed.rows, evidencePreview.rows);
+  assert.equal(evidenceConfirmed.schemaVersion, 1);
+  const revised = await call(root + '/rows/' + storedGrasp.id, { revision: patched.revision,
+    fields: { conditions: { text: '确认后改写的前提', state: 'known' } } }, 200, 'PATCH');
+  assert.equal(revised.rows.find(row => row.id === storedGrasp.id).fields.conditions.text, '确认后改写的前提');
+  const evidenceJson = await call(root + '/download/' + evidenceSnapshotId);
+  const evidenceMarkdown = await call(root + '/download/' + evidenceSnapshotId + '?format=markdown');
+  assert.deepEqual(evidenceJson, evidenceConfirmed);
+  assert.equal(evidenceJson.rows.find(row => row.id === storedGrasp.id).fields.conditions.text, conditions);
+  assert.equal(evidenceJson.rows.find(row => row.id === storedGrasp.id).practice.evidence[0].title, 'Robot Grasp');
+  assert.equal(evidenceJson.rows.find(row => row.id === unmeasured.id).effectCheck, '原论文未验证效果');
+  assert.equal(evidenceJson.targetTask, undefined);
+  assert.equal(evidenceJson.prediction, undefined);
+  assert.equal(evidenceJson.rows.every(row => row.targetTask === undefined && row.prediction === undefined), true);
+  assert.match(evidenceMarkdown, /机械臂先生成有界抓取候选再排序/);
+  assert.match(evidenceMarkdown, /先用局部约束生成有界候选，再做廉价验证/);
+  assert.match(evidenceMarkdown, /候选可由局部约束枚举，且逐个验证的代价低/);
+  assert.match(evidenceMarkdown, /成功率从 21 升到 42/);
+  assert.match(evidenceMarkdown, /Robot Grasp · grasp\.pdf · 第 1 页/);
+  assert.match(evidenceMarkdown, /无明显改善/);
+  assert.match(evidenceMarkdown, /失败/);
+  assert.match(evidenceMarkdown, /原论文未验证效果/);
+  assert.match(evidenceMarkdown, /供下游评估迁移/);
+  assert.match(evidenceMarkdown, /由下游完成/);
+  assert.match(evidenceMarkdown, new RegExp(evidenceSnapshotId));
+  assert.doesNotMatch(evidenceMarkdown, /确认后改写的前提/);
+  const preservedMarkdown = await call(root + '/download/' + snapshotId + '?format=markdown');
+  const preserved = await call(root + '/download/' + snapshotId);
+  assert.equal(preservedMarkdown, markdown);
+  assert.deepEqual(preserved, snapshot);
+  const legacySelection = { revision: revised.revision, items: [{ id: oldId, includeIdea: true }] };
+  const legacyPreview = await call(root + '/delivery-preview', legacySelection);
+  assert.equal(legacyPreview.rows[0].metaMethod, undefined);
+  assert.equal(legacyPreview.rows[0].practice, undefined);
+  assert.equal(legacyPreview.rows[0].idea, '旧设想');
+  assert.equal(legacyPreview.rows[0].fields.conditions.text, '旧条件仍可改');
+  const legacySnapshotId = randomUUID();
+  const legacyConfirmed = await call(root + '/deliveries', { ...legacySelection, snapshotId: legacySnapshotId, confirmed: true }, 201);
+  const legacyMarkdown = await call(root + '/download/' + legacySnapshotId + '?format=markdown');
+  const legacyJson = await call(root + '/download/' + legacySnapshotId);
+  assert.deepEqual(legacyJson, legacyConfirmed);
+  assert.match(legacyMarkdown, /旧条件仍可改/);
+  assert.match(legacyMarkdown, /旧设想/);
+  assert.doesNotMatch(legacyMarkdown, /元方法|具体做法|供下游评估迁移|有界抓取生成/);
+  assert.equal(legacyJson.rows[0].metaMethod, undefined);
+  assert.equal(legacyJson.schemaVersion, 1);
+  const empty = await call(root + '/candidates', { connectionId: connection.id, papers: [ref(insufficient)], topicScope });
+  assert.deepEqual(empty.rows, []);
+  const missing = await call(root + '/candidates', { connectionId: connection.id, papers: [ref(unsourced)], topicScope });
+  assert.deepEqual(missing.rows, []);
+});
+
+test('a reading highlight is stored on its reading record and restored after reload', async t => {
+  const quote = '阅读高亮落在这段正文里';
+  const passage = `前文。${quote}。中段。${quote}。后文。`;
+  const second = passage.lastIndexOf(quote);
+  assert.deepEqual(locateHighlight(passage, {
+    quote, prefix: passage.slice(second - 4, second), suffix: passage.slice(second + quote.length, second + quote.length + 3),
+    start: passage.indexOf(quote), end: passage.indexOf(quote) + quote.length,
+  }), [second, second + quote.length]);
+  assert.deepEqual(locateHighlight('abc阅读高亮xyz', { quote: '阅读高亮', prefix: 'abc', suffix: 'xyz', start: 0, end: 4 }), [3, 7]);
+
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-highlight-'));
+  let app;
+  t.after(async () => {
+    await app?.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  const paperId = randomUUID();
+  const versionId = randomUUID();
+  const jobA = randomUUID();
+  const jobB = randomUUID();
+  const markdown = `前文。${quote}。后文保持不变。`;
+  const start = markdown.indexOf(quote);
+  const section = { key: 'overview', title: '论文速览', markdown };
+  const library = await openLibrary(directory);
+  library.put('papers', { id: paperId, title: '阅读高亮示例', versionId, versions: [{ id: versionId, name: 'v1.pdf', pages: 1 }], repos: [] });
+  for (const id of [jobA, jobB]) {
+    library.put('jobs', { id, mode: 'deep', status: 'completed', updated: '2026-11-26T00:00:00.000Z',
+      references: [{ id: paperId, versionId }], sections: [{ ...section }] });
+  }
+  library.close();
+
+  app = await createApp({ directory });
+  let token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function request(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }) });
+    const result = await response.json();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+  const anchor = { section: 'overview', color: 'amber', quote, prefix: markdown.slice(0, start), suffix: markdown.slice(start + quote.length), start, end: start + quote.length };
+  const created = await request('jobs/' + jobA + '/highlights', { method: 'POST', json: anchor, status: 201 });
+  assert.equal(created.jobId, jobA);
+  assert.equal(created.section, 'overview');
+  assert.equal(created.color, 'amber');
+  assert.equal(created.quote, quote);
+  assert.equal(created.prefix, anchor.prefix);
+  assert.equal(created.suffix, anchor.suffix);
+  assert.equal(created.start, start);
+  assert.equal(created.end, start + quote.length);
+  assert.match(created.id, /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
+  assert.match(created.created, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
+  assert.deepEqual(await request('jobs/' + jobB + '/highlights'), []);
+  await request('jobs/' + jobA + '/highlights', { method: 'POST', json: { ...anchor, quote: '不在正文中的句子', start: 0, end: '不在正文中的句子'.length }, status: 400 });
+  assert.equal(Object.hasOwn(await request('jobs/' + jobA), 'highlights'), false);
+
+  await app.close();
+  const stored = await openLibrary(directory);
+  try {
+    assert.deepEqual(stored.get('highlights', created.id), created);
+    assert.deepEqual(stored.all('highlights').map(item => item.jobId), [jobA]);
+    assert.equal(Object.hasOwn(stored.get('jobs', jobA), 'highlights'), false);
+  } finally { stored.close(); }
+
+  app = await createApp({ directory });
+  token = (await (await fetch(app.url + '/api/session')).json()).token;
+  assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
+  const other = await request('jobs/' + jobB + '/highlights', {
+    method: 'POST', json: { ...anchor, color: 'blue' }, status: 201,
+  });
+  assert.equal(other.jobId, jobB);
+  assert.equal(other.color, 'blue');
+  assert.notEqual(other.id, created.id);
+  assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
+  assert.deepEqual(await request('jobs/' + jobB + '/highlights'), [other]);
+});
+
+test('a highlight annotation stays on its highlight until the reader confirms it into the main note', async t => {
+  const quote = '这段原文会被摘录';
+  const otherQuote = '另一处只做阅读高亮';
+  const draft = '批注草稿甲';
+  const revised = '批注修订乙';
+  const unconfirmed = '尚未再次确认的批注丙';
+  const markdown = `前文。${quote}。中间。${otherQuote}。后文。`;
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-annotation-'));
+  let app;
+  t.after(async () => {
+    await app?.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  const paperId = randomUUID();
+  const versionId = randomUUID();
+  const jobA = randomUUID();
+  const jobB = randomUUID();
+  const section = { key: 'overview', title: '论文速览', markdown };
+  const library = await openLibrary(directory);
+  library.put('papers', { id: paperId, title: '批注论文', versionId, versions: [{ id: versionId, name: 'v1.pdf', pages: 1 }], repos: [] });
+  for (const id of [jobA, jobB]) {
+    library.put('jobs', { id, mode: 'deep', status: 'completed', updated: '2026-11-26T00:00:00.000Z',
+      references: [{ id: paperId, versionId }], sections: [{ ...section }] });
+  }
+  library.close();
+  await mkdir(join(directory, 'papers', paperId), { recursive: true });
+
+  function anchor(text, color) {
+    const start = markdown.indexOf(text);
+    return { section: 'overview', color, quote: text, prefix: markdown.slice(Math.max(0, start - 8), start),
+      suffix: markdown.slice(start + text.length, start + text.length + 8), start, end: start + text.length };
+  }
+
+  app = await createApp({ directory });
+  let token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function request(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }) });
+    const result = await response.json();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+
+  const created = await request('jobs/' + jobA + '/highlights', { method: 'POST', json: anchor(quote, 'amber'), status: 201 });
+  assert.equal(Object.hasOwn(created, 'annotation'), false);
+  const bare = await request('jobs/' + jobA + '/highlights', { method: 'POST', json: anchor(otherQuote, 'green'), status: 201 });
+  assert.equal(Object.hasOwn(bare, 'annotation'), false);
+  const before = await request('papers/' + paperId + '/note');
+  assert.equal(before.markdown.includes(draft), false);
+  assert.equal(before.markdown.includes('高亮批注'), false);
+
+  const saved = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: draft } });
+  assert.deepEqual(Object.keys(saved.annotation).sort(), ['text', 'updated']);
+  assert.equal(saved.annotation.text, draft);
+  assert.match(saved.annotation.updated, /^\d{4}-\d{2}-\d{2}T/);
+  const { annotation, ...storedHighlight } = saved;
+  assert.deepEqual(storedHighlight, created);
+  assert.equal((await request('papers/' + paperId + '/note')).markdown.includes(draft), false);
+  assert.equal(Object.hasOwn(await request('jobs/' + jobA), 'highlights'), false);
+  await request('jobs/' + jobB + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: '不属于这条阅读记录' }, status: 404 });
+  await request('jobs/' + jobA + '/highlights/' + bare.id + '/note', { method: 'POST', json: {}, status: 400 });
+  assert.equal((await request('papers/' + paperId + '/note')).markdown.includes('高亮批注'), false);
+
+  await app.close();
+  const stored = await openLibrary(directory);
+  try {
+    assert.equal(stored.get('highlights', created.id).annotation.text, draft);
+    assert.equal(Object.hasOwn(stored.get('jobs', jobA), 'highlights'), false);
+    assert.equal(Object.hasOwn(stored.get('highlights', bare.id), 'annotation'), false);
+  } finally { stored.close(); }
+
+  app = await createApp({ directory });
+  token = (await (await fetch(app.url + '/api/session')).json()).token;
+  const reloaded = (await request('jobs/' + jobA + '/highlights')).find(item => item.id === created.id);
+  assert.equal(reloaded.annotation.text, draft);
+  assert.equal(reloaded.annotation.updated, saved.annotation.updated);
+  const edited = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: revised } });
+  assert.equal(edited.annotation.text, revised);
+  assert.notEqual(edited.annotation.updated, saved.annotation.updated);
+  const stillPrivate = await request('papers/' + paperId + '/note');
+  assert.equal(stillPrivate.markdown.includes(draft), false);
+  assert.equal(stillPrivate.markdown.includes(revised), false);
+
+  const noted = await request('jobs/' + jobA + '/highlights/' + created.id + '/note', { method: 'POST', json: {} });
+  const marker = '<!-- papermaster:highlight:' + created.id + ' -->';
+  const href = `/?paper=${paperId}&job=${jobA}&chapter=overview&highlight=${created.id}`;
+  assert.equal(noted.markdown.includes(draft), false);
+  assert.ok(noted.markdown.includes(revised));
+  assert.ok(noted.markdown.includes('> ' + quote));
+  assert.ok(noted.markdown.includes('[阅读位置 · 论文速览](' + href + ')'));
+  assert.equal(noted.markdown.split(marker).length - 1, 1);
+  assert.equal((await request('papers/' + paperId + '/note')).markdown, noted.markdown);
+
+  const pending = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: unconfirmed } });
+  assert.equal(pending.annotation.text, unconfirmed);
+  const afterEdit = await request('papers/' + paperId + '/note');
+  assert.equal(afterEdit.markdown.includes(unconfirmed), false);
+  assert.ok(afterEdit.markdown.includes(revised));
+
+  const cleared = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: '' } });
+  assert.equal(Object.hasOwn(cleared, 'annotation'), false);
+  assert.equal(cleared.quote, quote);
+  const kept = await request('papers/' + paperId + '/note');
+  assert.ok(kept.markdown.includes(revised));
+  assert.equal(kept.markdown.includes(unconfirmed), false);
+  assert.equal((await request('jobs/' + jobA + '/highlights')).some(item => item.id === cleared.id && !Object.hasOwn(item, 'annotation')), true);
+  await request('jobs/' + jobB + '/highlights/' + cleared.id, { method: 'DELETE', status: 404 });
+  const removed = await request('jobs/' + jobA + '/highlights/' + cleared.id, { method: 'DELETE' });
+  assert.equal(removed.id, cleared.id);
+  assert.equal((await request('jobs/' + jobA + '/highlights')).some(item => item.id === cleared.id), false);
+  const noteAfterDelete = await request('papers/' + paperId + '/note');
+  assert.ok(noteAfterDelete.markdown.includes(revised));
+  assert.ok(noteAfterDelete.markdown.includes(href));
+});
+
+test('a fresh data directory has no preset papers and an existing library still opens', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-empty-'));
+  const otherDirectory = await mkdtemp(join(tmpdir(), 'papermaster-empty-other-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 3 }));
+  t.after(() => rm(otherDirectory, { recursive: true, force: true, maxRetries: 3 }));
+  let paper;
+  const app = await createApp({ directory });
+  const other = await createApp({ directory: otherDirectory });
+  try {
+    const headers = await sessionHeaders(app);
+    const otherHeaders = await sessionHeaders(other);
+    const empty = await (await fetch(app.url + '/api/library', { headers })).json();
+    assert.deepEqual(empty.papers, []);
+    assert.deepEqual(empty.jobs, []);
+    assert.equal(empty.firstReadingSkipped, false);
+    assert.deepEqual(await readdir(join(directory, 'papers')), []);
+
+    const skipped = await fetch(app.url + '/api/settings/first-reading', {
+      method: 'PUT', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ skipped: true }),
+    });
+    assert.equal(skipped.status, 200);
+    assert.deepEqual(await skipped.json(), { skipped: true });
+    assert.equal((await (await fetch(app.url + '/api/library', { headers })).json()).firstReadingSkipped, true);
+    const separate = await (await fetch(other.url + '/api/library', { headers: otherHeaders })).json();
+    assert.equal(separate.firstReadingSkipped, false);
+    assert.deepEqual(separate.papers, []);
+    assert.deepEqual(separate.jobs, []);
+
+    const uploaded = await fetch(app.url + '/api/papers?name=owned.pdf', {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/pdf' },
+      body: pdf('Owned Paper', 'A reader-owned paper explains one concrete method, the input it expects, and the result it reports.'),
+    });
+    assert.equal(uploaded.status, 201);
+    paper = await uploaded.json();
+    const current = await (await fetch(app.url + '/api/papers/' + paper.id + '/note', { headers })).json();
+    const saved = await fetch(app.url + '/api/papers/' + paper.id + '/note', {
+      method: 'PUT', headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ markdown: '# 主笔记\n\n已有阅读成果应当保留。', revision: current.revision }),
+    });
+    assert.equal(saved.status, 200);
+  } finally { await app.close(); await other.close(); }
+
+  const stored = await openLibrary(directory);
+  try {
+    stored.put('jobs', {
+      id: randomUUID(), mode: 'skim', status: 'completed', formatVersion: 2, connectionId: 'kept',
+      references: [{ id: paper.id, versionId: paper.versionId }],
+      sections: [{ key: 'skim', title: '论文全貌', markdown: '已有阅读记录' }],
+      created: new Date().toISOString(), updated: new Date().toISOString(),
+    });
+  } finally { stored.close(); }
+
+  const reopened = await createApp({ directory });
+  try {
+    const headers = await sessionHeaders(reopened);
+    const library = await (await fetch(reopened.url + '/api/library', { headers })).json();
+    assert.equal(library.firstReadingSkipped, true);
+    assert.equal(library.papers.length, 1);
+    assert.equal(library.papers[0].id, paper.id);
+    assert.equal(library.papers[0].title, paper.title);
+    assert.equal(library.jobs.length, 1);
+    assert.equal(library.jobs[0].status, 'completed');
+    const job = await (await fetch(reopened.url + '/api/jobs/' + library.jobs[0].id, { headers })).json();
+    assert.equal(job.sections[0].markdown, '已有阅读记录');
+    const note = await (await fetch(reopened.url + '/api/papers/' + paper.id + '/note', { headers })).json();
+    assert.match(note.markdown, /已有阅读成果应当保留/);
+    assert.deepEqual((await readdir(join(directory, 'papers'))).filter(name => name !== paper.id), []);
+  } finally { await reopened.close(); }
+
+  const otherAgain = await createApp({ directory: otherDirectory });
+  try {
+    const headers = await sessionHeaders(otherAgain);
+    const library = await (await fetch(otherAgain.url + '/api/library', { headers })).json();
+    assert.equal(library.firstReadingSkipped, false);
+    assert.deepEqual(library.papers, []);
+    assert.deepEqual(library.jobs, []);
+  } finally { await otherAgain.close(); }
+});
+
+async function sessionHeaders(app) {
+  const { token } = await (await fetch(app.url + '/api/session')).json();
+  return { 'x-papermaster-session': token };
+}
+
+test('deep-read generation language follows the interface unless overridden', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-language-'));
+  const prompts = [];
+  const remoteFetch = async (url, options) => {
+    prompts.push(JSON.parse(options.body).input);
+    return fixtureStream(url, { summary: 'kept', takeaways: ['one'], markdown: 'stored reading body' });
+  };
+  const app = await createApp({ directory, remoteFetch });
+  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function call(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, {
+      method,
+      headers: { 'x-papermaster-session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }),
+    });
+    const value = response.headers.get('content-type')?.includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(value));
+    return value;
+  }
+  async function finish(id) {
+    for (let index = 0; index < 80; index += 1) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(20);
+    }
+    throw new Error('deep read did not finish');
+  }
+  function takePrompts() {
+    const batch = prompts.splice(0, prompts.length);
+    assert.equal(batch.length, 6);
+    return batch;
+  }
+
+  assert.deepEqual((await call('library')).language, { interface: 'zh', generation: null, effective: 'zh' });
+  const uploaded = await fetch(app.url + '/api/papers?name=language.pdf', {
+    method: 'POST', headers: { 'x-papermaster-session': token, 'content-type': 'application/pdf' },
+    body: pdf('Language paper', 'This article describes algorithms experiments and an attention mechanism using evaluated methods and assumptions.'),
+  });
+  assert.equal(uploaded.status, 201);
+  const paper = await uploaded.json();
+  const connection = await call('connections', { method: 'POST', json: { provider: 'openai', model: 'fixture', key: 'fixture-key' }, status: 201 });
+  assert.equal((await call('library')).defaultConnection, connection.id);
+
+  const chinese = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  assert.equal(chinese.status, 'completed');
+  assert.equal(chinese.generationLanguage, 'zh');
+  assert.equal(chinese.sections[0].title, '论文速览');
+  assert.equal(chinese.sections[0].markdown, 'stored reading body');
+  const defaultPrompts = takePrompts();
+  assert.ok(defaultPrompts.every(prompt => prompt.includes('使用中文，保留关键英文术语。') && !prompt.includes('Write in English.')));
+  assert.match(defaultPrompts[0], /当前小节：论文速览。/);
+
+  const followed = await call('settings/language', { method: 'PUT', json: { interface: 'en' } });
+  assert.deepEqual(followed, { interface: 'en', generation: null, effective: 'en' });
+  assert.equal((await call('library')).defaultConnection, connection.id);
+  const note = await call('papers/' + paper.id + '/note');
+  const handwritten = await call('papers/' + paper.id + '/note', {
+    method: 'PUT', json: { markdown: note.markdown + '\n\nHandwritten note stays put.', revision: note.revision },
+  });
+  const english = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  const englishPrompts = takePrompts();
+  assert.equal(english.generationLanguage, 'en');
+  assert.equal(english.sections[0].title, 'Paper overview');
+  assert.ok(englishPrompts.every(prompt => prompt.includes('Write in English.') && !prompt.includes('使用中文')));
+  assert.match(englishPrompts[0], /Section: Paper overview\./);
+
+  const override = await call('settings/language', { method: 'PUT', json: { generation: 'zh' } });
+  assert.deepEqual(override, { interface: 'en', generation: 'zh', effective: 'zh' });
+  const chineseAgain = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  const overridePrompts = takePrompts();
+  assert.equal(chineseAgain.generationLanguage, 'zh');
+  assert.equal(chineseAgain.sections[0].title, '论文速览');
+  assert.ok(overridePrompts.every(prompt => prompt.includes('使用中文，保留关键英文术语。') && !prompt.includes('Write in English.')));
+  assert.match(overridePrompts[0], /当前小节：论文速览。/);
+
+  const preserved = await call('jobs/' + chinese.id);
+  assert.equal(preserved.sections[0].markdown, 'stored reading body');
+  assert.equal(preserved.sections[0].title, '论文速览');
+  assert.equal((await call('papers/' + paper.id + '/note')).markdown, handwritten.markdown);
+  assert.equal((await call('library')).papers.find(item => item.id === paper.id).title, paper.title);
+  assert.equal((await call('settings/language', { method: 'PUT', json: { interface: 'fr' }, status: 400 })).error, '请选择界面语言。');
+});
+
+test('deleting a model connection waits for queued and running jobs', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-delete-connection-'));
+  let app;
+  t.after(async () => { await app?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const credentials = new Map();
+  const vault = {
+    async set(id, key) { credentials.set(id, key); },
+    async get(id) { return credentials.get(id); },
+    async delete(id) { credentials.delete(id); },
+  };
+  let release;
+  let failOnce = true;
+  const remoteFetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    const prompt = (Array.isArray(body.input) ? body.input[0].content[0].text : body.input) ||
+      body.messages?.[0]?.content || body.contents?.[0]?.parts?.[0]?.text;
+    if (prompt.includes('"focus":"先卡住"')) {
+      return new Promise((resolve, reject) => {
+        release = () => resolve(fixtureStream(url, { markdown: '保留下来的阅读', summary: '结论仍在' }));
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      });
+    }
+    if (prompt.includes('"focus":"先失败"') && failOnce) {
+      failOnce = false;
+      return new Response('', { status: 429 });
+    }
+    return fixtureStream(url, { markdown: '换连接后的阅读', summary: '续跑完成' });
+  };
+  app = await createApp({ directory, vault, remoteFetch });
+  const token = (await (await fetch(app.url + '/api/session')).json()).token;
+  const call = async (path, options = {}, expected = 200) => {
+    const response = await fetch(app.url + '/api/' + path, {
+      method: options.method || 'GET',
+      headers: { 'x-papermaster-session': token, ...(options.json ? { 'content-type': 'application/json' } : options.headers) },
+      body: options.json ? JSON.stringify(options.json) : options.body,
+    });
+    const type = response.headers.get('content-type') || '';
+    const value = type.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer());
+    assert.equal(response.status, expected, path + ': ' + JSON.stringify(value).slice(0, 400));
+    return value;
+  };
+  const post = (path, json, status) => call(path, { method: 'POST', json }, status ?? 200);
+  const settle = async id => {
+    for (let i = 0; i < 80; i++) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(30);
+    }
+    throw new Error('Job never finished');
+  };
+  const text = 'This article describes algorithms experiments and an attention mechanism using evaluated methods and assumptions.';
+  const paper = await call('papers?name=primary.pdf', {
+    method: 'POST', headers: { 'content-type': 'application/pdf' }, body: pdf('Primary paper', text),
+  }, 201);
+  const primary = await post('connections', { provider: 'openai', label: '阅读甲', model: 'fixture', key: 'fixture-key' }, 201);
+  const spare = await post('connections', { provider: 'gemini', label: '备用', model: 'spare', key: 'fixture-key' }, 201);
+  const other = await post('connections', { provider: 'claude', label: '阅读乙', model: 'fixture-claude', key: 'fixture-key' }, 201);
+  assert.equal((await call('library')).defaultConnection, primary.id);
+  assert.equal((await call('connections/' + spare.id, { method: 'DELETE' })).id, spare.id);
+  const kept = await call('library');
+  assert.equal(kept.defaultConnection, primary.id);
+  assert.equal(kept.connections.some(item => item.id === spare.id), false);
+  assert.equal(credentials.has(spare.id), false);
+  assert.equal(credentials.has(primary.id), true);
+
+  const held = await post('jobs', {
+    mode: 'skim', papers: [{ id: paper.id }], connectionId: primary.id, focus: '先卡住',
+  }, 202);
+  for (let i = 0; i < 80 && !release; i++) await delay(30);
+  assert.equal(typeof release, 'function');
+  assert.equal((await call('jobs/' + held.id)).status, 'running');
+  const queued = await post('jobs', {
+    mode: 'skim', papers: [{ id: paper.id }], connectionId: primary.id, focus: '先失败',
+  }, 202);
+  assert.equal(queued.status, 'queued');
+  await delay(40);
+  assert.equal((await call('jobs/' + queued.id)).status, 'queued');
+  const blocked = await call('connections/' + primary.id, { method: 'DELETE' }, 409);
+  assert.equal(blocked.code, 'connection_in_use');
+  assert.match(blocked.error, /排队或正在运行/);
+  assert.equal((await call('jobs/' + held.id)).status, 'running');
+  assert.equal((await call('jobs/' + queued.id)).status, 'queued');
+  const busyLibrary = await call('library');
+  assert.equal(busyLibrary.defaultConnection, primary.id);
+  assert.equal(busyLibrary.connections.some(item => item.id === primary.id), true);
+
+  release();
+  const done = await settle(held.id);
+  assert.equal(done.status, 'completed');
+  assert.equal(done.sections[0].model, 'fixture-openai');
+  assert.equal(done.sections[0].connectionId, primary.id);
+  assert.match(done.sections[0].markdown, /保留下来的阅读/);
+  const failed = await settle(queued.id);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.errorCode, 'model_limit');
+
+  assert.equal((await call('connections/' + primary.id, { method: 'DELETE' })).id, primary.id);
+  const library = await call('library');
+  assert.equal(library.defaultConnection, undefined);
+  assert.equal(library.connections.some(item => item.id === primary.id), false);
+  assert.equal(library.connections.some(item => item.id === other.id), true);
+  assert.equal(library.jobs.some(item => item.id === held.id && item.status === 'completed'), true);
+  assert.equal(credentials.has(primary.id), false);
+  assert.equal(credentials.has(other.id), true);
+  const archived = await call('jobs/' + held.id);
+  assert.equal(archived.sections[0].model, 'fixture-openai');
+  assert.equal(archived.sections[0].connectionId, primary.id);
+  assert.match((await call('jobs/' + held.id + '/note')).markdown, /模型：fixture-openai/);
+  assert.match((await call('jobs/' + held.id + '/note')).markdown, /保留下来的阅读/);
+
+  const rejected = await post('jobs/' + failed.id + '/resume', { connectionId: primary.id }, 400);
+  assert.match(rejected.error, /请选择模型连接/);
+  const resumed = await post('jobs/' + failed.id + '/resume', { connectionId: other.id }, 202);
+  const finished = await settle(resumed.id);
+  assert.equal(finished.status, 'completed');
+  assert.equal(finished.sections[0].connectionId, other.id);
+  assert.equal(finished.sections[0].model, 'fixture-claude');
+  assert.match(finished.sections[0].markdown, /换连接后的阅读/);
+  await post('jobs', { mode: 'skim', papers: [{ id: paper.id }], connectionId: primary.id }, 400);
+  const explicit = await post('jobs', { mode: 'skim', papers: [{ id: paper.id }], connectionId: other.id }, 202);
+  const next = await settle(explicit.id);
+  assert.equal(next.status, 'completed');
+  assert.equal(next.sections[0].connectionId, other.id);
+  assert.equal((await call('library')).defaultConnection, undefined);
+  await call('connections/00000000-0000-0000-0000-000000000099', { method: 'DELETE' }, 404);
+});
+
+test('similar mechanisms group together while each paper keeps its own result', () => {
+  const mechanism = '先用局部约束生成有界候选，再做廉价验证';
+  const field = text => ({ text, state: 'known', evidence: [{ kind: 'paper', page: 1, quote: text }] });
+  const paper = (title, id) => ({ paperId: id, versionId: id + '-v1', title, version: 'v1' });
+  const record = (id, title, { method = mechanism, conditions, outcome, effectCheck, practice, result }) => ({
+    id,
+    paper: paper(title, id),
+    metaMethod: {
+      structuralProblem: field('组合搜索空间过大，穷举不可行'),
+      mechanism: field(method),
+      conditions: field(conditions),
+    },
+    practice: field(practice),
+    ...(outcome ? { experiment: {
+      metric: field('成功率'), comparison: field('对照基线'), data: field(conditions),
+      result: field(result), outcome,
+    } } : { effectCheck }),
+    fields: {
+      name: field(practice), problem: field('组合搜索空间过大，穷举不可行'),
+      pipeline: field(method), conditions: field(conditions),
+    },
+  });
+  const rows = [
+    record('grasp', 'Robot Grasp', { conditions: '候选可被局部约束枚举', outcome: 'effective', practice: '有界抓取生成', result: '成功率从 21 升到 42' }),
+    record('protein', 'Protein Contacts', { conditions: '对照已经包含更强基线', outcome: 'no_improvement', practice: '接触排序', result: '与更强基线相比没有明显提升' }),
+    record('theory', 'Theory Sketch', { conditions: '原文只解释机制', effectCheck: '原论文未验证效果', practice: '未测量的有界提议' }),
+    record('keyword', 'Keyword Index', { method: '按标题关键词检索论文', conditions: '标题共享关键词', outcome: 'failure', practice: '标题关键词索引', result: '检索没有改善任务指标' }),
+    record('spaced', 'Spaced Mechanism', { method: '  先用局部约束生成有界候选，再做廉价验证  ', conditions: '空白只影响书写', outcome: 'failure', practice: '同一机制的另一种写法', result: '失败仍属于这一元方法' }),
+    { id: 'old', paper: paper('Robot Grasp', 'old'), idea: '旧设想', fields: {
+      name: field('旧方法'), problem: field('旧问题'), pipeline: field('旧流程'), conditions: field('旧条件'),
+    } },
+  ];
+  const groups = groupMethodRecords(rows);
+  assert.deepEqual(groups.map(group => group.kind), ['meta', 'meta', 'legacy']);
+  const shared = groups.find(group => group.mechanism === mechanism);
+  assert.deepEqual(shared.rows.map(row => row.id), ['grasp', 'protein', 'theory', 'spaced']);
+  assert.deepEqual(shared.rows.map(row => row.metaMethod.conditions.text), ['候选可被局部约束枚举', '对照已经包含更强基线', '原文只解释机制', '空白只影响书写']);
+  assert.deepEqual(shared.rows.map(row => row.experiment?.outcome || row.effectCheck), ['effective', 'no_improvement', '原论文未验证效果', 'failure']);
+  assert.equal(shared.rows[2].experiment, undefined);
+  assert.notEqual(shared.rows[0].experiment.result.text, shared.rows[1].experiment.result.text);
+  assert.equal(shared.rows[0].experiment.result.evidence[0].quote, '成功率从 21 升到 42');
+  assert.equal(shared.rows[1].practice.evidence[0].quote, '接触排序');
+  assert.equal(shared.rows[0].paper.title, 'Robot Grasp');
+  assert.equal(shared.rows[1].paper.title, 'Protein Contacts');
+  const keyword = groups.find(group => group.mechanism === '按标题关键词检索论文');
+  assert.deepEqual(keyword.rows.map(row => row.id), ['keyword']);
+  assert.equal(groups[2].rows[0].metaMethod, undefined);
+  assert.equal(groups[2].rows[0].fields.name.text, '旧方法');
+  assert.equal(groups[2].rows[0].fields.pipeline.text, '旧流程');
+});
+
+test('follow-ups and method candidates follow the generation language without rewriting stored text', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-bilingual-rest-'));
+  const prompts = [];
+  const quote = 'attention mechanism using evaluated methods';
+  const candidateRow = {
+    relevance: { kind: 'direct', reason: 'The mechanism matches the topic', evidence: [{ kind: 'paper', page: 1, quote }] },
+    metaMethod: {
+      structuralProblem: { text: 'Search needs a bound', state: 'known' },
+      mechanism: { text: 'Generate a bounded set first', state: 'known' },
+      conditions: { text: 'Inputs are bounded', state: 'known' },
+    },
+    practice: { text: 'Bounded generation in this paper', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+    experiment: {
+      metric: { text: 'Score', state: 'known' },
+      comparison: { text: 'Method A against Method B', state: 'known' },
+      data: { text: 'The reported table', state: 'known' },
+      result: { text: 'Method A scores 21', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+      outcome: 'effective',
+    },
+    fields: {
+      name: { text: 'Bounded generation', state: 'known' },
+      problem: { text: 'How to find candidates', state: 'known' },
+      pipeline: { text: 'Point to generation to candidates', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+      conditions: { text: 'Bounded inputs', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+    },
+  };
+  const remoteFetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    const prompt = typeof body.input === 'string' ? body.input : '';
+    prompts.push(prompt);
+    if (prompt.startsWith('Task: PaperMaster reading follow-up') || prompt.startsWith('任务：PaperMaster 阅读追问')) {
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      return fixtureStream(url, {
+        answer: content.question === '再问一次' ? 'later answer stays separate' : 'stored follow-up answer',
+        evidence: [{ kind: 'paper', page: 1, quote }],
+      });
+    }
+    if (prompt.startsWith('Task: PaperMaster method-table candidates')) return fixtureStream(url, { rows: [candidateRow] });
+    if (prompt.startsWith('任务：PaperMaster 主题方法表提炼')) return fixtureStream(url, { rows: [] });
+    if (prompt.startsWith('任务：PaperMaster 主题相关性复核')) {
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      return fixtureStream(url, { decisions: content.items.map(item => ({ id: item.id, direct: true })) });
+    }
+    return fixtureStream(url, { summary: 'kept', takeaways: ['one'], markdown: 'stored reading body' });
+  };
+  const app = await createApp({ directory, remoteFetch });
+  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function call(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, {
+      method,
+      headers: { 'x-papermaster-session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }),
+    });
+    const value = response.headers.get('content-type')?.includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(value));
+    return value;
+  }
+  async function finish(id) {
+    for (let index = 0; index < 80; index += 1) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(20);
+    }
+    throw new Error('deep read did not finish');
+  }
+
+  const uploaded = await fetch(app.url + '/api/papers?name=bilingual.pdf', {
+    method: 'POST', headers: { 'x-papermaster-session': token, 'content-type': 'application/pdf' },
+    body: pdf('Language paper', 'This article describes algorithms experiments and an attention mechanism using evaluated methods and assumptions.'),
+  });
+  assert.equal(uploaded.status, 201);
+  const paper = await uploaded.json();
+  const connection = await call('connections', { method: 'POST', json: { provider: 'openai', model: 'fixture', key: 'fixture-key' }, status: 201 });
+  const job = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  assert.equal(job.sections[0].title, '论文速览');
+  assert.equal(job.sections[0].markdown, 'stored reading body');
+  const existing = await call('papers/' + paper.id + '/note');
+  const handwritten = await call('papers/' + paper.id + '/note', {
+    method: 'PUT', json: { markdown: existing.markdown + '\n\nHandwritten note stays put.', revision: existing.revision },
+  });
+  prompts.length = 0;
+
+  const followed = await call('settings/language', { method: 'PUT', json: { interface: 'en' } });
+  assert.deepEqual(followed, { interface: 'en', generation: null, effective: 'en' });
+  const threadId = randomUUID();
+  const englishFollow = await call('jobs/' + job.id + '/followups', {
+    method: 'POST',
+    json: {
+      threadId, turnId: randomUUID(), question: 'What does the mechanism assume?', connectionId: connection.id,
+      position: { section: 'overview', text: 'stored reading body' },
+    },
+  });
+  assert.equal(englishFollow.turns[0].answer, 'stored follow-up answer');
+  assert.equal(englishFollow.turns[0].evidence[0].page, 1);
+  assert.equal(englishFollow.turns[0].evidence[0].title, paper.title);
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].startsWith('Task: PaperMaster reading follow-up. Write in English.'));
+  assert.ok(!prompts[0].includes('使用中文'));
+  const noted = await call('jobs/' + job.id + '/followup-note/' + threadId, {
+    method: 'POST',
+    json: {
+      turnId: englishFollow.turns[0].id, text: 'Handwritten excerpt stays.', observation: 'keep this idea',
+      kind: 'idea', saveId: randomUUID(),
+    },
+  });
+  assert.match(noted.markdown, /Handwritten note stays put\./);
+  assert.match(noted.markdown, /Handwritten excerpt stays\./);
+  assert.match(noted.markdown, /提问位置/);
+  const table = await call('method-tables', { method: 'POST', json: { title: 'Geometric reasoning' }, status: 201 });
+  const draft = await call('method-tables/' + table.id + '/candidates', {
+    method: 'POST', json: { papers: [{ id: paper.id, versionId: paper.versionId }], connectionId: connection.id },
+  });
+  assert.equal(draft.rows[0].fields.name.text, 'Bounded generation');
+  const applied = await call('method-tables/' + table.id + '/apply', {
+    method: 'POST', json: { token: draft.token, items: [{ id: draft.rows[0].id }] },
+  });
+  assert.equal(prompts.length, 3);
+  assert.ok(prompts[1].startsWith('Task: PaperMaster method-table candidates. Write the candidate rows in English.'));
+  assert.ok(!prompts[1].includes('用中文输出候选行'));
+  assert.ok(prompts[2].startsWith('任务：PaperMaster 主题相关性复核'));
+  const stored = {
+    note: noted.markdown,
+    follow: englishFollow,
+    row: applied.rows[0],
+    title: job.sections[0].title,
+    markdown: job.sections[0].markdown,
+    paperTitle: paper.title,
+    citation: englishFollow.turns[0].evidence[0],
+  };
+  prompts.length = 0;
+
+  const override = await call('settings/language', { method: 'PUT', json: { generation: 'zh' } });
+  assert.deepEqual(override, { interface: 'en', generation: 'zh', effective: 'zh' });
+  await call('jobs/' + job.id + '/followups', {
+    method: 'POST',
+    json: {
+      threadId: randomUUID(), turnId: randomUUID(), question: '再问一次', connectionId: connection.id,
+      position: { section: 'overview', text: 'stored reading body' },
+    },
+  });
+  const emptyDraft = await call('method-tables/' + table.id + '/candidates', {
+    method: 'POST', json: { papers: [{ id: paper.id, versionId: paper.versionId }], connectionId: connection.id },
+  });
+  assert.deepEqual(emptyDraft.rows, []);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts[0].startsWith('任务：PaperMaster 阅读追问。使用中文'));
+  assert.ok(!prompts[0].includes('Write in English.'));
+  assert.ok(prompts[1].startsWith('任务：PaperMaster 主题方法表提炼'));
+  assert.ok(prompts[1].includes('用中文输出候选行'));
+  assert.ok(!prompts[1].includes('Write the candidate rows in English.'));
+
+  async function assertStored() {
+    const threads = await call('jobs/' + job.id + '/followups');
+    assert.deepEqual(threads.find(item => item.id === threadId), stored.follow);
+    assert.equal((await call('papers/' + paper.id + '/note')).markdown, stored.note);
+    assert.deepEqual((await call('method-tables/' + table.id)).rows[0], stored.row);
+    const kept = await call('jobs/' + job.id);
+    assert.equal(kept.sections[0].title, stored.title);
+    assert.equal(kept.sections[0].markdown, stored.markdown);
+    assert.equal((await call('library')).papers.find(item => item.id === paper.id).title, stored.paperTitle);
+    assert.deepEqual(threads.find(item => item.id === threadId).turns[0].evidence[0], stored.citation);
+  }
+  await assertStored();
+  const switched = await call('settings/language', { method: 'PUT', json: { interface: 'zh', generation: null } });
+  assert.deepEqual(switched, { interface: 'zh', generation: null, effective: 'zh' });
+  await assertStored();
 });
 
 test('import targets accept only the supported public hosts', () => {

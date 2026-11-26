@@ -11,7 +11,7 @@ import { openLibrary, writeAtomic } from './library.js';
 import { credentialVault } from './credentials.js';
 import { AppError, requiredText } from './errors.js';
 import { attachRepository, importPaper, loadPaper, PDF_LIMIT } from './import.js';
-import { createReadingService, modes } from './reading.js';
+import { connectionInUse, createReadingService, modes } from './reading.js';
 import { readingFigureParts, splitReadingMarkdown } from './reading-markdown.js';
 import { components, figureChapter, figureKeys } from './reading-figures.js';
 import { solveDemo } from './interaction-math.js';
@@ -19,9 +19,12 @@ import { prepareSource } from './interaction-source.js';
 import { modelServices, providers } from './providers.js';
 import { evidenceMarkdown, markdownText, uuid as idPattern } from './evidence.js';
 import { followupService } from './followups.js';
+import { highlightService } from './highlights.js';
 import { deliveryMarkdown, methodTables } from './method-tables.js';
 import { traceRepository } from './repository-reading.js';
 import { readingRepositoryBlock } from './draw2think-reading.js';
+import { readLanguage, saveLanguage } from './language.js';
+import { readFirstReading, saveFirstReading } from './first-reading.js';
 
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 const contentTypes = {
@@ -34,6 +37,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
   const models = modelServices(library, vault, remoteFetch, codex);
   const reader = createReadingService(library, models);
   const followups = followupService(library, models);
+  const highlights = highlightService(library);
   const tables = methodTables(library, models, readNote);
   const shutdown = new AbortController();
   const session = randomBytes(32).toString('hex');
@@ -59,7 +63,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
         return json(res, { token: session });
       }
       if (req.headers['x-papermaster-session'] !== session) throw new AppError('请刷新页面以恢复本地会话。', 403);
-      await route(req, res, url, { library, reader, models, tables, followups, serialized, signal: shutdown.signal });
+      await route(req, res, url, { library, reader, models, tables, followups, highlights, serialized, signal: shutdown.signal });
     } catch (error) {
       if (res.headersSent || res.destroyed) { if (!res.writableEnded) res.destroy(); return; }
       if (error instanceof AppError) json(res, { error: error.message, code: error.code }, error.status);
@@ -88,7 +92,7 @@ export async function createApp({ directory, port = 0, remoteFetch, vault = cred
   };
 }
 
-async function route(req, res, url, { library, reader, models, followups, tables, serialized, signal }) {
+async function route(req, res, url, { library, reader, models, followups, highlights, tables, serialized, signal }) {
   const parts = url.pathname.slice('/api/'.length).split('/');
   const [resource, id, action, member] = parts;
   const method = req.method;
@@ -104,7 +108,8 @@ async function route(req, res, url, { library, reader, models, followups, tables
         id, references, mode, status, updated, interactive: Boolean(interaction),
         sections: sections.filter(item => item.markdown).map(({ key, title }) => ({ key, title })),
       })),
-      providers, modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
+      providers, language: readLanguage(library), firstReadingSkipped: readFirstReading(library),
+      modes: Object.fromEntries(Object.entries(modes).filter(([key]) => key !== 'feedback').map(([key, item]) => [key, item.label])) });
   }
   if (resource === 'method-tables') {
     if (!id && method === 'GET') return json(res, tables.list());
@@ -189,6 +194,12 @@ async function route(req, res, url, { library, reader, models, followups, tables
       return json(res, await serialized(() => appendNote(library, id, marker, passage)));
     }
   }
+  if (resource === 'settings' && id === 'language' && !action && method === 'PUT') {
+    return json(res, saveLanguage(library, await body(req)));
+  }
+  if (resource === 'settings' && id === 'first-reading' && !action && method === 'PUT') {
+    return json(res, saveFirstReading(library, await body(req)));
+  }
   if (resource === 'connections') {
     if (!id && method === 'POST') return json(res, await models.save(await body(req)), 201);
     if (id === 'codex' && action === 'models' && !member && method === 'GET') {
@@ -200,6 +211,15 @@ async function route(req, res, url, { library, reader, models, followups, tables
     }
     if (id && action === 'check' && method === 'POST') {
       return json(res, await models.check(get('connections', id), AbortSignal.timeout(60_000)));
+    }
+    if (id && !action && method === 'DELETE') {
+      return json(res, await serialized(() => {
+        const connection = get('connections', id);
+        if (connectionInUse(library.all('jobs'), connection.id)) {
+          throw new AppError('此连接还有排队或正在运行的任务，请等任务结束后再删除。', 409, 'connection_in_use');
+        }
+        return models.remove(connection.id);
+      }));
     }
     if (id && !action && method === 'PATCH') {
       const { model, effort } = await body(req);
@@ -224,6 +244,27 @@ async function route(req, res, url, { library, reader, models, followups, tables
       if (action === 'followups' && member && method === 'DELETE') return json(res, followups.remove(id, member));
       if (action === 'followups' && !member && method === 'POST') {
         return json(res, await followups.ask(job, await body(req), signal));
+      }
+      if (action === 'highlights' && !member && method === 'GET') return json(res, highlights.list(id));
+      if (action === 'highlights' && !member && method === 'POST') {
+        return json(res, highlights.create(job, await body(req)), 201);
+      }
+      if (action === 'highlights' && member && method === 'PATCH') {
+        if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+        const input = await body(req);
+        return json(res, await serialized(() => highlights.saveAnnotation(job, member, input)));
+      }
+      if (action === 'highlights' && member && !parts[4] && method === 'DELETE') {
+        if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+        return json(res, highlights.remove(job, member));
+      }
+      if (action === 'highlights' && member && parts[4] === 'note' && !parts[5] && method === 'POST') {
+        if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+        await body(req);
+        return json(res, await serialized(() => {
+          const passage = highlights.annotationPassage(job, member);
+          return replaceMarkedNote(library, job.references[0].id, '<!-- papermaster:highlight:' + member + ' -->', passage);
+        }));
       }
       if (action === 'followup-note' && member && method === 'POST') {
         const input = await body(req);
@@ -367,14 +408,33 @@ async function readNote(library, id) {
   return { markdown, revision: createHash('sha256').update(markdown).digest('hex') };
 }
 
-async function appendNote(library, id, marker, passage) {
+const noteLimit = 300_000;
+
+async function updateNote(library, id, revise) {
   const note = await readNote(library, id);
-  if (!note.markdown.includes(marker)) {
-    const contents = note.markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage;
-    if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
-    await writeAtomic(library.path(id, 'note.md'), contents);
+  const contents = revise(note.markdown);
+  if (typeof contents === 'string') {
+    if (contents.length > noteLimit) throw new AppError('笔记超过大小限制。可先导出已有内容。');
+    if (contents !== note.markdown) await writeAtomic(library.path(id, 'note.md'), contents);
   }
   return readNote(library, id);
+}
+
+async function appendNote(library, id, marker, passage) {
+  return updateNote(library, id, markdown => markdown.includes(marker) ? null
+    : markdown.trimEnd() + '\n\n' + marker + '\n\n' + passage);
+}
+
+async function replaceMarkedNote(library, id, marker, passage) {
+  return updateNote(library, id, markdown => {
+    const block = marker + '\n\n' + passage;
+    const start = markdown.indexOf(marker);
+    if (start < 0) return markdown.trimEnd() + '\n\n' + block + '\n';
+    const next = markdown.indexOf('\n<!-- papermaster:', start + marker.length);
+    const end = next < 0 ? markdown.length : next;
+    const suffix = markdown.slice(end);
+    return markdown.slice(0, start) + block + (suffix ? (suffix.startsWith('\n') ? suffix : '\n' + suffix) : '\n');
+  });
 }
 
 function exportJob(library, job, key, title = true) {

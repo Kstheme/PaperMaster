@@ -8,9 +8,11 @@ import { Reader } from './reader.jsx';
 import { ReadingFigure, ReadingSources } from './interaction-reader.jsx';
 import { Followups } from './reading-tools.jsx';
 import { MethodWorkspace } from './method-workspace.jsx';
-import { ConnectionPicker, EffortField, paperMatches, useAction, useCodexCatalog } from './workbench-fields.jsx';
+import { ConnectionPicker, EffortField, paperMatches, useAction, useCodexCatalog, useConnectionChoice } from './workbench-fields.jsx';
 import { MotionTabsList, positionHighlight } from './interface-motion.jsx';
+import { FirstReading, firstReadingSkipped, rememberFirstReading } from './first-reading.jsx';
 import { figureChapter, figureKeys } from '../server/reading-figures.js';
+import { LocaleProvider, translate, useLocale } from './locale.jsx';
 import './style.css';
 import './interaction.css';
 import './motion.css';
@@ -18,8 +20,6 @@ import './motion.css';
 const empty = { papers: [], jobs: [], connections: [], providers: {}, modes: {} };
 const active = status => ['queued', 'running'].includes(status);
 const stateLabels = { queued: '等待运行', running: '正在生成', completed: '已完成', failed: '生成失败', cancelled: '已停止', interrupted: '上次中断' };
-const readingLabels = { skim: '快速理解问题、方法和主要结论', deep: '完整阅读方法、公式、实验和局限',
-  repo: '沿一个样本理解仓库架构、数据构造和公式实现' };
 const upcomingModes = new Set(['guided', 'compare', 'question']);
 const incoming = new URLSearchParams(location.search);
 
@@ -34,14 +34,17 @@ function useLibrary() {
     return result;
   }, []);
   useEffect(() => { reload().catch(err => setError(err.message)); }, [reload]);
-  return { library, ready, error, setError, reload };
+  const setLanguage = useCallback(language => setLibrary(current => ({ ...current, language })), []);
+  const markGuideSkipped = useCallback(() => setLibrary(current => ({ ...current, firstReadingSkipped: true })), []);
+  return { library, ready, error, setError, reload, setLanguage, markGuideSkipped };
 }
 
 function ImportPaper({ onPaper, onError, isMain }) {
   const [run, busy] = useAction(onError);
+  const { t } = useLocale();
   return <section className="panel import">
-    {isMain ? <h1>导入论文</h1> : <h2>导入论文</h2>}
-    <label htmlFor="local-pdf">选择本地 PDF</label>
+    {isMain ? <h1>{t('importHeading')}</h1> : <h2>{t('importHeading')}</h2>}
+    <label htmlFor="local-pdf">{t('choosePdf')}</label>
     <input id="local-pdf" type="file" accept=".pdf,application/pdf" disabled={busy} onChange={event => {
       const file = event.target.files[0];
       if (!file) return;
@@ -58,24 +61,26 @@ function ImportPaper({ onPaper, onError, isMain }) {
       const arxiv = new FormData(event.currentTarget).get('arxiv');
       run(async () => onPaper(await api('papers', { method: 'POST', json: { arxiv } })));
     }}>
-      <label htmlFor="arxiv">或粘贴 arXiv 链接</label>
+      <label htmlFor="arxiv">{t('orArxiv')}</label>
       <div className="input-row"><input id="arxiv" name="arxiv" type="url" placeholder="https://arxiv.org/abs/…" required/>
-        <button className="primary" disabled={busy}><Plus size={15}/>导入</button></div>
+        <button className="primary" disabled={busy}><Plus size={15}/>{t('importAction')}</button></div>
     </form>
-    <p className="muted" role="status">{busy ? '正在提取论文正文…' : '支持可提取正文的 PDF。'}</p>
+    <p className="muted" role="status">{busy ? t('extracting') : t('pdfHint')}</p>
   </section>;
 }
 
 function CodexModelField({ catalog, value, onChange }) {
-  return <label>Codex 模型
-    {catalog.error ? <input name="model" value={value} onChange={event => onChange(event.target.value)}
-      maxLength={180} placeholder="留空时沿用本机 Codex 配置"/>
+  const { t } = useLocale();
+  const manual = catalog.error || catalog.empty;
+  return <label>{t('codexModel')}
+    {manual ? <input name="model" value={value} onChange={event => onChange(event.target.value)}
+      maxLength={180} placeholder={t('codexModelPlaceholder')}/>
       : <select name="model" value={value} onChange={event => onChange(event.target.value)}>
-        <option value="">沿用本机 Codex 配置</option>
+        <option value="">{t('useLocalCodex')}</option>
         {catalog.models.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-        {value && !catalog.models.some(item => item.id === value) && <option value={value}>{value}（已配置）</option>}
+        {value && !catalog.models.some(item => item.id === value) && <option value={value}>{value}{t('configuredSuffix')}</option>}
       </select>}
-    {catalog.loading && <span role="status">正在读取 Codex 模型…</span>}
+    {catalog.loading && <span role="status">{t('readingCodexModels')}</span>}
   </label>;
 }
 
@@ -86,9 +91,10 @@ function ProviderForm({ library, catalog, onSaved }) {
   const [feedback, setFeedback] = useState('');
   const [run, busy] = useAction(setFeedback);
   const [keyMode, setKeyMode] = useState('key');
+  const { language, t } = useLocale();
   const definition = library.providers[provider];
   return <section className="panel">
-    <h2>模型连接</h2>
+    <h2>{t('modelConnection')}</h2>
     <form className="settings-form" onSubmit={event => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -100,31 +106,31 @@ function ProviderForm({ library, catalog, onSaved }) {
         setCodexModel('');
         setEffort('default');
         await onSaved(connection);
-        setFeedback('已添加模型连接。');
+        setFeedback('connectionAdded');
       });
     }}>
-      <label>接入方式<select name="provider" value={provider} onChange={event => setProvider(event.target.value)}>
-        {Object.entries(library.providers).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}
+      <label>{t('accessMethod')}<select name="provider" value={provider} onChange={event => setProvider(event.target.value)}>
+        {Object.entries(library.providers).map(([id]) => <option key={id} value={id}>{t('provider.' + id)}</option>)}
       </select></label>
-      <label>连接名称<input name="label" placeholder={definition?.label}/></label>
+      <label>{t('connectionName')}<input name="label" placeholder={t('provider.' + provider)}/></label>
       {provider === 'codex' ? <CodexModelField catalog={catalog} value={codexModel} onChange={setCodexModel}/>
-        : <label>模型名<input name="model" required placeholder="输入服务商提供的模型标识"/></label>}
+        : <label>{t('modelName')}<input name="model" required placeholder={t('modelNamePlaceholder')}/></label>}
       {provider === 'codex' && <>
-        <EffortField connection={{ provider, model: codexModel }} catalog={catalog} value={effort} onChange={setEffort} label="默认思考强度"/>
-        <p className="muted">使用本机 Codex CLI。首次使用请安装 CLI 并运行 <code>codex login</code>。</p>
+        <EffortField connection={{ provider, model: codexModel }} catalog={catalog} value={effort} onChange={setEffort} localize label={t('defaultEffortLabel')}/>
+        <p className="muted">{t('codexCliHint')} <code>codex login</code>{language === 'en' ? '.' : '。'}</p>
       </>}
-      {provider === 'compatible' && <label>Base URL<input name="base" type="url" required placeholder="https://服务商/v1"/></label>}
+      {provider === 'compatible' && <label>Base URL<input name="base" type="url" required placeholder="https://example.com/v1"/></label>}
       {provider !== 'codex' && <>
-        <label>凭证来源<select value={keyMode} onChange={event => setKeyMode(event.target.value)}>
-          <option value="key">本机系统凭证</option><option value="env">环境变量</option>
+        <label>{t('credentialSource')}<select value={keyMode} onChange={event => setKeyMode(event.target.value)}>
+          <option value="key">{t('systemCredential')}</option><option value="env">{t('envVar')}</option>
         </select></label>
         {keyMode === 'key'
           ? <label>API Key<input type="password" autoComplete="off" name="key" required/></label>
-          : <label>环境变量名<input key={provider} name="env" defaultValue={definition?.env} required/></label>}
+          : <label>{t('envVarName')}<input key={provider} name="env" defaultValue={definition?.env} required/></label>}
       </>}
-      <div className="actions"><button className="primary" disabled={busy || !definition}>添加连接</button></div>
+      <div className="actions"><button className="primary" disabled={busy || !definition}>{t('addConnection')}</button></div>
     </form>
-    {feedback && <p role="status" className="message">{feedback}</p>}
+    {feedback && <p role="status" className="message">{t(feedback)}</p>}
   </section>;
 }
 
@@ -132,6 +138,7 @@ function CodexModelEditor({ connection, catalog, onSaved, onError }) {
   const [model, setModel] = useState(connection.model || '');
   const [effort, setEffort] = useState(connection.effort || 'default');
   const [run, busy] = useAction(onError);
+  const { t } = useLocale();
   return <form className="codex-model-editor" onSubmit={event => {
     event.preventDefault();
     run(async () => {
@@ -140,46 +147,63 @@ function CodexModelEditor({ connection, catalog, onSaved, onError }) {
     });
   }}>
     <CodexModelField catalog={catalog} value={model} onChange={setModel}/>
-    <EffortField connection={{ ...connection, model }} catalog={catalog} value={effort} onChange={setEffort} label="默认思考强度"/>
-    <button disabled={busy || (model.trim() === (connection.model || '') && effort === (connection.effort || 'default'))}>保存模型设置</button>
+    <EffortField connection={{ ...connection, model }} catalog={catalog} value={effort} onChange={setEffort} localize label={t('defaultEffortLabel')}/>
+    <button disabled={busy || (model.trim() === (connection.model || '') && effort === (connection.effort || 'default'))}>{t('saveModelSettings')}</button>
   </form>;
 }
 
 function Connections({ library, onSaved, onUpdated, onError }) {
   const [run, busy] = useAction(onError);
-  const [probe, setProbe] = useState('');
+  const [probe, setProbe] = useState(null);
   const [revision, setRevision] = useState(0);
   const catalog = useCodexCatalog(true, revision);
+  const { t } = useLocale();
+  const catalogMessage = catalog.empty ? t('codexNoModels') : catalog.error;
   return <>
-    {catalog.error && <div className="actions catalog-error" role="status">
-      <p className="muted">{catalog.error} 可以手动填写 Codex 模型名。</p>
-      <button onClick={() => setRevision(value => value + 1)}>重新获取列表</button>
+    {catalogMessage && <div className="actions catalog-error" role="status">
+      <p className="muted">{t('codexManual', { error: catalogMessage })}</p>
+      <button onClick={() => setRevision(value => value + 1)}>{t('refreshModelList')}</button>
     </div>}
     <div className="two-panels">
       <ProviderForm library={library} catalog={catalog} onSaved={onSaved}/>
     <section className="panel">
-      <h2>已添加的连接</h2>
-      {library.connections.length === 0 && <p className="muted">添加一个连接后即可生成阅读内容。</p>}
+      <h2>{t('addedConnections')}</h2>
+      {library.connections.length === 0 && <p className="muted">{t('addConnectionHint')}</p>}
+      {library.connections.length > 0 && !library.defaultConnection &&
+        <p className="muted">{t('noDefaultConnection')}</p>}
       <ul className="connection-list">{library.connections.map(connection => <li key={connection.id}>
-        <div><strong>{connection.label}</strong> <small>{connection.id === library.defaultConnection ? '默认' : ''}</small><p className="muted">{connection.model || '本机配置模型'}</p></div>
+        <div><strong>{connection.label}</strong> <small>{connection.id === library.defaultConnection ? t('defaultBadge') : ''}</small><p className="muted">{connection.model || t('localConfiguredModel')}</p></div>
         <div className="actions">
           <button disabled={busy} onClick={() => run(async () => {
-            setProbe('正在检查 ' + connection.label + '…');
+            setProbe({ key: 'checkingConnection', label: connection.label });
             try {
               const report = await api(`connections/${connection.id}/check`, { method: 'POST' });
               const limit = report.limits?.primary;
-              setProbe(connection.label + (report.mode === 'chatgpt' ? `：ChatGPT 已登录${limit?.usedPercent != null ? `，当前窗口已用 ${limit.usedPercent}%` : '，用量未知'}` : '：模型已响应 ' + report.model));
-            } catch (error) { setProbe(''); throw error; }
-          })}>检查</button>
+              setProbe(report.mode === 'chatgpt'
+                ? (limit?.usedPercent != null
+                  ? { key: 'chatgptSignedIn', label: connection.label, percent: limit.usedPercent }
+                  : { key: 'chatgptUsageUnknown', label: connection.label })
+                : { key: 'modelResponded', label: connection.label, model: report.model });
+            } catch (error) { setProbe(null); throw error; }
+          })}>{t('checkConnection')}</button>
           <button disabled={busy || connection.id === library.defaultConnection} onClick={() => run(async () => {
             await api('connections/default', { method: 'PUT', json: { connectionId: connection.id } });
             await onSaved(connection);
-          })}>设为默认</button>
+          })}>{t('setDefault')}</button>
+          <button disabled={busy} onClick={() => {
+            if (!confirm(t('deleteConnectionConfirm', { label: connection.label }))) return;
+            run(async () => {
+              const wasDefault = connection.id === library.defaultConnection;
+              await api(`connections/${connection.id}`, { method: 'DELETE' });
+              setProbe({ key: wasDefault ? 'deletedDefaultConnection' : 'deletedConnection' });
+              await onUpdated();
+            });
+          }}>{t('deleteConnection')}</button>
         </div>
         {connection.provider === 'codex' && <CodexModelEditor key={connection.model} connection={connection}
           catalog={catalog} onSaved={onUpdated} onError={onError}/>}
       </li>)}</ul>
-      <p className="muted" role="status">{probe}</p>
+      <p className="muted" role="status">{probe ? t(probe.key, probe) : ''}</p>
     </section>
     </div>
   </>;
@@ -198,6 +222,8 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
   const catalog = useCodexCatalog(Boolean(mode && chosenConnection?.provider === 'codex'));
   const [run, busy] = useAction(onError);
   const [repoRun, repoBusy] = useAction(onError);
+  const { t } = useLocale();
+  const connectionLabels = { label: t('connection'), placeholder: t('chooseConnection'), localModel: t('localModel') };
   const selectedVersion = paper.versions.some(item => item.id === version) ? version : paper.versionId;
   const canUseInteractive = ['skim', 'deep', 'guided', 'repo'].includes(mode);
   const selectedRepo = repo ?? paper.repos.at(-1)?.id ?? '';
@@ -205,14 +231,14 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
   const usedRepo = selectedRepo === 'new' ? '' : selectedRepo;
   return <>
     <section className="panel reading-launch">
-      <h2>选择阅读方式</h2>
-      <div className="mode-grid">{Object.entries(library.modes).map(([key, label]) => {
+      <h2>{t('chooseMode')}</h2>
+      <div className="mode-grid">{Object.entries(library.modes).map(([key]) => {
         const upcoming = upcomingModes.has(key);
         return <button key={key} type="button" disabled={upcoming} aria-pressed={upcoming ? undefined : mode === key}
           className={upcoming ? undefined : 'pointer-highlight'} onPointerMove={upcoming ? undefined : positionHighlight}
           onClick={() => { setMode(key); setFocus(''); }}>
-          <strong>{label}{!upcoming && <ArrowUpRight size={16} aria-hidden="true"/>}</strong>
-          <span>{upcoming ? '敬请期待' : readingLabels[key]}</span>
+          <strong>{t('mode.' + key)}{!upcoming && <ArrowUpRight size={16} aria-hidden="true"/>}</strong>
+          <span>{upcoming ? t('comingSoon') : t('blurb.' + key)}</span>
         </button>;
       })}</div>
       {mode && <form className="settings-form" onSubmit={event => {
@@ -234,44 +260,44 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
         });
       }}>
         <div className="input-row">
-          <ConnectionPicker library={library} value={connection} onChange={setConnection}/>
-          <label>论文版本<select value={selectedVersion} onChange={event => setVersion(event.target.value)}>{paper.versions.map(item =>
-            <option key={item.id} value={item.id}>{item.arxivVersion || item.name} · {item.pages} 页</option>)}</select></label>
+          <ConnectionPicker library={library} value={connection} onChange={setConnection} {...connectionLabels}/>
+          <label>{t('paperVersion')}<select value={selectedVersion} onChange={event => setVersion(event.target.value)}>{paper.versions.map(item =>
+            <option key={item.id} value={item.id}>{item.arxivVersion || item.name} · {t('pageCount', { count: item.pages })}</option>)}</select></label>
         </div>
-        <EffortField connection={chosenConnection} catalog={catalog} value={effort} onChange={setEffort} inherit/>
-        {mode === 'compare' && <fieldset><legend>选择对照论文</legend>
+        <EffortField connection={chosenConnection} catalog={catalog} value={effort} onChange={setEffort} inherit localize label={t('effort')}/>
+        {mode === 'compare' && <fieldset><legend>{t('compareLegend')}</legend>
           {library.papers.filter(item => item.id !== paper.id).map(item => <label className="check" key={item.id}>
             <input type="checkbox" checked={others.includes(item.id)} onChange={event => setOthers(current =>
               event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))}/>{item.title}</label>)}
-          {library.papers.length < 2 && <p className="muted">请先导入第二篇论文。</p>}
+          {library.papers.length < 2 && <p className="muted">{t('needSecondPaper')}</p>}
         </fieldset>}
         {mode === 'repo' && <fieldset className="repo-start">
-          <legend>本次精读的仓库</legend>
-          <label>仓库快照<select value={addRepo ? 'new' : usedRepo} onChange={event => setRepo(event.target.value)} disabled={busy}>
+          <legend>{t('repoLegend')}</legend>
+          <label>{t('repoSnapshot')}<select value={addRepo ? 'new' : usedRepo} onChange={event => setRepo(event.target.value)} disabled={busy}>
             {paper.repos.map(item => <option key={item.id} value={item.id}>{item.url.split('/').slice(-2).join('/')} · {item.commit.slice(0, 8)}</option>)}
-            <option value="new">关联新的公开 GitHub 仓库</option>
+            <option value="new">{t('linkNewRepo')}</option>
           </select></label>
           {addRepo && <div className="input-row">
-            <label>仓库地址<input name="repoUrl" type="url" placeholder="https://github.com/owner/repo" required disabled={busy}/></label>
-            <label>分支、标签或提交（可选）<input name="repoRef" maxLength={120} placeholder="默认分支" disabled={busy}/></label>
+            <label>{t('repoUrl')}<input name="repoUrl" type="url" placeholder="https://github.com/owner/repo" required disabled={busy}/></label>
+            <label>{t('repoRef')}<input name="repoRef" maxLength={120} placeholder={t('defaultBranch')} disabled={busy}/></label>
           </div>}
-          <p className="muted">仓库提交会随阅读记录保存。实现和数据流程会嵌在对应的论文小节中。</p>
+          <p className="muted">{t('repoHint')}</p>
         </fieldset>}
-        {canUseInteractive && mode !== 'repo' && paper.repos.length > 0 && <label>参考仓库<select value={usedRepo} onChange={event => setRepo(event.target.value)}>
-          <option value="">仅使用论文</option>{paper.repos.map(item =>
+        {canUseInteractive && mode !== 'repo' && paper.repos.length > 0 && <label>{t('referenceRepo')}<select value={usedRepo} onChange={event => setRepo(event.target.value)}>
+          <option value="">{t('paperOnly')}</option>{paper.repos.map(item =>
             <option key={item.id} value={item.id}>{item.url.split('/').at(-1)} · {item.commit.slice(0, 8)}</option>)}</select></label>}
-        <label>{mode === 'question' ? '你的问题' : '阅读重点（可选）'}
+        <label>{mode === 'question' ? t('yourQuestion') : t('focusOptional')}
           <textarea rows="2" value={focus} onChange={event => setFocus(event.target.value)} maxLength={4000} required={mode === 'question'}/>
         </label>
         {canUseInteractive && <div className="interactive-options">
-          <label className="check"><input type="checkbox" checked={interactive} onChange={event => setInteractive(event.target.checked)}/>在正文中生成交互图</label>
+          <label className="check"><input type="checkbox" checked={interactive} onChange={event => setInteractive(event.target.checked)}/>{t('interactiveFigures')}</label>
           {interactive && <ImagePreference checked={sendImages} onChange={setSendImages}/>}
         </div>}
         <div className="actions"><button className="primary" disabled={busy || repoBusy || !connection || (mode === 'compare' && others.length === 0)}>
-          <Sparkles size={15}/>{busy && mode === 'repo' ? '正在准备精读…' : '开始' + library.modes[mode]}</button></div>
+          <Sparkles size={15}/>{busy && mode === 'repo' ? t('preparingReading') : t('startMode', { mode: t('mode.' + mode) })}</button></div>
       </form>}
     </section>
-    {mode !== 'repo' && <details className="panel"><summary>关联公开 GitHub 仓库 {paper.repos.length ? `· ${paper.repos.length} 个快照` : ''}</summary>
+    {mode !== 'repo' && <details className="panel"><summary>{t('linkPublicRepo')}{paper.repos.length ? t('snapshotCount', { count: paper.repos.length }) : ''}</summary>
       <form className="settings-form" onSubmit={event => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -283,9 +309,9 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
           await onChanged();
         });
       }}>
-        <label>仓库主页<input name="url" required type="url" placeholder="https://github.com/owner/repo"/></label>
-        <label>分支、标签或提交（可选）<input name="ref" placeholder="默认分支"/></label>
-        <div className="actions"><button disabled={repoBusy}><Braces size={15}/>{repoBusy ? '读取中…' : '读取静态快照'}</button></div>
+        <label>{t('repoHome')}<input name="url" required type="url" placeholder="https://github.com/owner/repo"/></label>
+        <label>{t('repoRef')}<input name="ref" placeholder={t('defaultBranch')}/></label>
+        <div className="actions"><button disabled={repoBusy}><Braces size={15}/>{repoBusy ? t('readingSnapshotBusy') : t('readingSnapshot')}</button></div>
       </form>
       {paper.repos.map(item => <p key={item.id} className="muted"><a href={item.url + '/tree/' + item.commit} target="_blank" rel="noreferrer">{item.url} · {item.commit.slice(0, 10)}</a></p>)}
     </details>}
@@ -293,8 +319,9 @@ function StartReading({ paper, library, connection, setConnection, onJob, onChan
 }
 
 function ImagePreference({ checked, onChange }) {
+  const { t } = useLocale();
   return <label className="check"><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)}/>
-    允许将少量核心图表裁片发送给所选模型。关闭后只向模型发送提取的文字与数据。</label>;
+    {t('allowImages')}</label>;
 }
 
 function Note({ paper, jobs, onError, revisionSignal }) {
@@ -306,6 +333,7 @@ function Note({ paper, jobs, onError, revisionSignal }) {
   const [proposal, setProposal] = useState(null);
   const [candidate, setCandidate] = useState('');
   const [run, busy] = useAction(onError);
+  const { t } = useLocale();
   const path = `papers/${paper.id}/note`;
   const snippets = jobs.filter(job => job.status === 'completed' && job.mode !== 'compare' && job.references[0]?.id === paper.id)
     .flatMap(job => job.sections.map(section => ({ value: job.id + ':' + section.key, label: section.title })));
@@ -315,7 +343,7 @@ function Note({ paper, jobs, onError, revisionSignal }) {
   }, [path]);
   useEffect(() => { load().catch(error => onError(error.message)); }, [load, onError, revisionSignal]);
   return <section className="panel">
-    <h2>主笔记</h2>
+    <h2>{t('tabNote')}</h2>
     <label htmlFor="note-text" className="muted">Markdown</label>
     <textarea id="note-text" className="note-editor" rows="16" value={text} disabled={version === null}
       onSelect={event => {
@@ -326,35 +354,35 @@ function Note({ paper, jobs, onError, revisionSignal }) {
     <div className="actions">
       <button className="primary" disabled={busy || text === saved || !version} onClick={() => run(async () => {
         const note = await api(path, { method: 'PUT', json: { markdown: text, revision: version } });
-        setVersion(note.revision); setSaved(note.markdown); setMessage('已保存');
-      })}>保存笔记</button>
-      <button onClick={() => download(markdownBlob(text), paper.title + '.md')}><ArrowDownToLine size={15}/>导出 Markdown</button>
+        setVersion(note.revision); setSaved(note.markdown); setMessage('noteSaved');
+      })}>{t('saveNote')}</button>
+      <button onClick={() => download(markdownBlob(text), paper.title + '.md')}><ArrowDownToLine size={15}/>{t('exportMarkdown')}</button>
       <button disabled={busy} onClick={() => {
-        if (text === saved || confirm('重新载入会丢弃当前未保存的编辑。是否继续？')) run(load);
-      }}>重新载入</button>
-      <span className="muted" role="status">{message || (text !== saved && '有未保存编辑')}</span>
+        if (text === saved || confirm(t('reloadConfirm'))) run(load);
+      }}>{t('reloadNote')}</button>
+      <span className="muted" role="status">{message ? t(message) : (text !== saved && t('unsavedEdits'))}</span>
     </div>
-    {saved && <details className="note-render"><summary>查看已保存笔记与出处</summary><Markdown>{saved}</Markdown></details>}
+    {saved && <details className="note-render"><summary>{t('viewSavedNote')}</summary><Markdown>{saved}</Markdown></details>}
     {snippets.length > 0 && <details className="replace">
-      <summary>用阅读成果替换选中的笔记片段</summary>
-      <p className="muted">在编辑框中选中要替换的文字，再选择一段已生成的小节。</p>
-      <div className="actions"><select aria-label="替换来源" value={candidate} onChange={event => { setCandidate(event.target.value); setProposal(null); }}>
-        <option value="">选择已生成小节</option>{snippets.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+      <summary>{t('replaceSnippet')}</summary>
+      <p className="muted">{t('replaceHint')}</p>
+      <div className="actions"><select aria-label={t('replaceSource')} value={candidate} onChange={event => { setCandidate(event.target.value); setProposal(null); }}>
+        <option value="">{t('chooseSection')}</option>{snippets.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
       </select>
       <button disabled={!selection || !candidate || busy} onClick={() => run(async () => {
         const [jobId, key] = candidate.split(':');
         const result = await api('jobs/' + jobId);
         const snippet = result.sections.find(section => section.key === key);
         if (snippet?.markdown) setProposal({ ...selection, replacement: snippet.markdown });
-      })}>预览替换</button></div>
+      })}>{t('previewReplace')}</button></div>
       {proposal && <div className="proposal">
-        <h3>原片段</h3><pre>{proposal.target}</pre>
-        <h3>拟替换为</h3><Markdown>{proposal.replacement}</Markdown>
+        <h3>{t('originalSnippet')}</h3><pre>{proposal.target}</pre>
+        <h3>{t('proposedReplacement')}</h3><Markdown>{proposal.replacement}</Markdown>
         <button onClick={() => {
-          if (text.slice(proposal.start, proposal.end) !== proposal.target) return onError('选中的原片段已修改，请重新选择。');
+          if (text.slice(proposal.start, proposal.end) !== proposal.target) return onError(t('selectionChanged'));
           setText(text.slice(0, proposal.start) + proposal.replacement + text.slice(proposal.end));
-          setProposal(null); setSelection(null); setMessage('已应用到编辑框，保存后写入主笔记。');
-        }}>应用到编辑框</button>
+          setProposal(null); setSelection(null); setMessage('appliedToEditor');
+        }}>{t('applyToEditor')}</button>
       </div>}
     </details>}
   </section>;
@@ -399,7 +427,7 @@ function RepositoryPanel({ paperId, repoId, onError, panelId, onAsk, section }) 
 }
 
 function JobView({ job, paper, library, onJob, onError, onNote }) {
-  const [resumeConnection, setResumeConnection] = useState(job.connectionId);
+  const [resumeConnection, setResumeConnection] = useConnectionChoice(library, job.connectionId);
   const [resumeEffort, setResumeEffort] = useState(job.effort || 'connection');
   const [followupsOpen, setFollowupsOpen] = useState(incoming.get('job') === job.id && incoming.has('thread'));
   const [intent, setIntent] = useState(null);
@@ -416,6 +444,8 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
   const repo = paper.repos.find(item => item.id === job.repoId);
   const resumeModel = library.connections.find(item => item.id === resumeConnection);
   const catalog = useCodexCatalog(canResume && resumeModel?.provider === 'codex');
+  const { t } = useLocale();
+  const connectionLabels = { label: t('connection'), placeholder: t('chooseConnection'), localModel: t('localModel') };
   const overviewId = 'repo-overview-' + job.id;
   const defaultRepo = repo || paper.repos.at(-1);
   const repositoryPanel = defaultRepo && job.mode !== 'compare' &&
@@ -430,53 +460,54 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
   function append(section) {
     run(async () => {
       await api(`papers/${paper.id}/append`, { method: 'POST', json: { jobId: job.id, section } });
-      setStatusMessage('已加入主笔记');
+      setStatusMessage(t('addedToNote'));
       onNote();
     });
   }
   return <>
-    <section className="run" aria-label="阅读任务">
+    <section className="run" aria-label={t('readingTask')}>
       <div className="run-info">
-        <h2>{library.modes[job.mode]}</h2>
-        <span className="status" data-status={job.status}>{stateLabels[job.status]}</span>
-        {job.status !== 'completed' && <p className="muted">{job.completedSteps} / {job.planned.length} 小节</p>}
+        <h2>{t('mode.' + job.mode)}</h2>
+        <span className="status" data-status={job.status}>{t('status.' + job.status)}</span>
+        {job.status !== 'completed' && <p className="muted">{t('sectionProgress', { done: job.completedSteps, total: job.planned.length })}</p>}
       </div>
       {active(job.status) && <div className="run-progress" role="status">
-        <p className="muted">{job.onlyComponent ? '正在重试组件' : job.planned[job.completedSteps]?.title && '正在准备 · ' + job.planned[job.completedSteps].title}</p>
-        <progress value={job.completedSteps} max={job.planned.length} aria-label="生成进度"/>
+        <p className="muted">{job.onlyComponent ? t('retryingComponent') : job.planned[job.completedSteps]?.title && t('preparingSection', { title: job.planned[job.completedSteps].title })}</p>
+        <progress value={job.completedSteps} max={job.planned.length} aria-label={t('generationProgress')}/>
       </div>}
       {job.error && <p className="error" role="alert">{job.error}</p>}
       <div className="actions">
-        {active(job.status) && <button disabled={busy} onClick={() => run(async () => onJob(await api(path + '/stop', { method: 'POST' })))}>停止生成</button>}
+        {active(job.status) && <button disabled={busy} onClick={() => run(async () => onJob(await api(path + '/stop', { method: 'POST' })))}>{t('stopGeneration')}</button>}
         {canResume && <>
-          <ConnectionPicker library={library} value={resumeConnection} onChange={setResumeConnection}/>
-          <EffortField connection={resumeModel} catalog={catalog} value={resumeEffort} onChange={setResumeEffort} inherit/>
+          <ConnectionPicker library={library} value={resumeConnection} onChange={setResumeConnection} {...connectionLabels}/>
+          <EffortField connection={resumeModel} catalog={catalog} value={resumeEffort} onChange={setResumeEffort} inherit localize label={t('effort')}/>
           <button className="primary" disabled={busy || !resumeConnection} onClick={() => run(async () =>
-            onJob(await api(path + '/resume', { method: 'POST', json: { connectionId: resumeConnection, effort: resumeEffort } })))}>用所选连接续跑</button>
+            onJob(await api(path + '/resume', { method: 'POST', json: { connectionId: resumeConnection, effort: resumeEffort } })))}>{t('resumeWithConnection')}</button>
         </>}
         {job.status === 'completed' && <>
-          {job.mode !== 'compare' && <button disabled={busy} onClick={() => append()}>加入主笔记</button>}
+          {job.mode !== 'compare' && <button disabled={busy} onClick={() => append()}>{t('addToMainNote')}</button>}
           <button disabled={busy} onClick={() => run(async () => {
             const { markdown } = await api(path + '/note');
-            download(markdownBlob(markdown), job.mode === 'compare' ? '论文比较.md' : paper.title + ' · ' + library.modes[job.mode] + '.md');
-          })}><ArrowDownToLine size={15}/>导出本次成果</button>
+            download(markdownBlob(markdown), job.mode === 'compare' ? t('comparisonFile') : paper.title + ' · ' + t('mode.' + job.mode) + '.md');
+          })}><ArrowDownToLine size={15}/>{t('exportResult')}</button>
         </>}
         <span role="status" className="muted">{statusMessage}</span>
       </div>
     </section>
     {canUpgrade && <details className="panel upgrade-reading">
-      <summary>{job.mode === 'repo' ? '生成新版关联仓库精读' : '生成交互版'}</summary>
-      <p className="muted">使用同一论文版本创建一份新记录，原阅读记录与主笔记会保留。</p>
+      <summary>{job.mode === 'repo' ? t('upgradeRepo') : t('upgradeInteractive')}</summary>
+      <p className="muted">{t('upgradeHint')}</p>
       <ImagePreference checked={sendImages} onChange={setSendImages}/>
       <button className="primary" disabled={busy} onClick={() => run(async () => onJob(await api(path + '/interactive',
-        { method: 'POST', json: { sendImages } })))}>开始生成</button>
+        { method: 'POST', json: { sendImages } })))}>{t('startGenerating')}</button>
     </details>}
     {!job.integratedRepo && repositoryPanel}
-    {isLesson && <a className="exercise-link" href="#guided-exercise">跳到引导练习</a>}
+    {isLesson && <a className="exercise-link" href="#guided-exercise">{t('jumpExercise')}</a>}
     {visible.length > 0 && <Reader key={job.id} id={job.id} sections={visible} busy={busy} repo={repo}
       onTool={job.mode !== 'compare' ? openFollowup : undefined}
       figures={figures} renderFigure={(name, onTool) => <ReadingFigure name={name} job={job} repo={repo} busy={busy} onNote={onNote} onTool={onTool}
         onRetry={key => run(async () => onJob(await api(path + '/component/' + key, { method: 'POST' })))}/>}
+      onNote={onNote} canAppendNote={job.status === 'completed' && job.mode !== 'compare'}
       onAppend={job.status === 'completed' && job.mode !== 'compare' ? append : null}/>}
     {job.integratedRepo && repositoryPanel}
     {followupsOpen && <Followups job={job} library={library} intent={intent}
@@ -491,7 +522,7 @@ function Exercise({ job, library, onError }) {
   const [attempt, setAttempt] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [answer, setAnswer] = useState('');
-  const [connection, setConnection] = useState(job.connectionId);
+  const [connection, setConnection] = useConnectionChoice(library, job.connectionId);
   const [effort, setEffort] = useState('connection');
   const model = library.connections.find(item => item.id === connection);
   const catalog = useCodexCatalog(model?.provider === 'codex');
@@ -563,7 +594,10 @@ function Exercise({ job, library, onError }) {
 }
 
 function App() {
-  const { library, ready, error, setError, reload } = useLibrary();
+  const { library, ready, error, setError, reload, setLanguage, markGuideSkipped } = useLibrary();
+  const interfaceLanguage = library.language?.interface === 'en' ? 'en' : 'zh';
+  const t = (key, vars) => translate(interfaceLanguage, key, vars);
+  useEffect(() => { document.documentElement.lang = interfaceLanguage === 'en' ? 'en' : 'zh-CN'; }, [interfaceLanguage]);
   const [selected, setSelected] = useState(incoming.get('paper') || localStorage.getItem('papermaster.paper') || '');
   const [current, setCurrent] = useState(null);
   const [tab, setTab] = useState('read');
@@ -571,7 +605,10 @@ function App() {
   const [connection, setConnection] = useState('');
   const [noteSignal, setNoteSignal] = useState(0);
   const [showImport, setShowImport] = useState(false);
+  const [guide, setGuide] = useState('pending');
+  const [guideStep, setGuideStep] = useState(0);
   const [run, busy] = useAction(setError);
+  const guideCatalog = useCodexCatalog(guide === 'open');
   const paper = library.papers.find(item => item.id === selected);
   const foundPapers = library.papers.filter(item => paperMatches(item, query));
   const requestedPdf = incoming.get('paper') === selected && paper?.versions.find(item => item.id === incoming.get('pdf'));
@@ -585,6 +622,11 @@ function App() {
     setTab('result');
     reload().catch(error => setError(error.message));
   }, [reload, setError]);
+  useEffect(() => {
+    if (!ready || guide !== 'pending') return;
+    const existing = library.papers.length > 0 || library.jobs.length > 0;
+    setGuide(existing || firstReadingSkipped(library) ? 'workbench' : 'open');
+  }, [ready, guide, library.papers.length, library.jobs.length, library.firstReadingSkipped]);
   useEffect(() => {
     if (!ready) return;
     const previous = incoming.get('job') || (!incoming.has('pdf') && localStorage.getItem('papermaster.job'));
@@ -623,97 +665,120 @@ function App() {
     localStorage.removeItem('papermaster.job');
   }
 
-  return <div className="workspace">
-    <a className="skip-link" href="#paper-workspace">跳到阅读区</a>
+  function skipGuide(nextTab) {
+    setGuide('workbench');
+    if (typeof nextTab === 'string') setTab(nextTab);
+    rememberFirstReading().then(markGuideSkipped).catch(() => {});
+  }
+
+  function finishGuide(job) {
+    setGuide('workbench');
+    onJob(job);
+  }
+
+  return <LocaleProvider language={interfaceLanguage}><div className="workspace">
+    <a className="skip-link" href="#paper-workspace">{t('skipToReading')}</a>
     <header className="topbar">
       <div className="brand"><span><BookOpen size={19} aria-hidden="true"/></span>PaperMaster</div>
-      <nav className="actions topbar-actions" aria-label="工作区工具">
-        <button aria-pressed={tab === 'methods'} onClick={() => setTab(tab === 'methods' ? (current ? 'result' : 'read') : 'methods')}>
-          <Layers3 size={16}/>主题方法表</button>
-        <button aria-pressed={tab === 'connections'} aria-label={tab === 'connections' ? '返回阅读' : '模型连接'}
-          title={tab === 'connections' ? '返回阅读' : '模型连接'}
-          onClick={() => setTab(tab === 'connections' ? (current ? 'result' : 'read') : 'connections')}>
-          <KeyRound size={16}/><span className="topbar-label">{tab === 'connections' ? '返回阅读' : '模型连接'}</span>
+      <nav className="actions topbar-actions" aria-label={t('workspaceTools')}>
+        <LanguageSettings language={library.language} busy={busy} onError={setError} onChange={async patch => {
+          setLanguage(await api('settings/language', { method: 'PUT', json: patch }));
+        }}/>
+        <button aria-pressed={guide !== 'open' && tab === 'methods'} onClick={() => guide === 'open' ? skipGuide('methods') : setTab(tab === 'methods' ? (current ? 'result' : 'read') : 'methods')}>
+          <Layers3 size={16}/>{t('methodTables')}</button>
+        <button aria-pressed={guide === 'open' ? guideStep === 1 : tab === 'connections'} aria-label={guide !== 'open' && tab === 'connections' ? t('backToReading') : t('modelConnection')}
+          title={guide !== 'open' && tab === 'connections' ? t('backToReading') : t('modelConnection')}
+          onClick={() => guide === 'open' ? setGuideStep(1) : setTab(tab === 'connections' ? (current ? 'result' : 'read') : 'connections')}>
+          <KeyRound size={16}/><span className="topbar-label">{guide !== 'open' && tab === 'connections' ? t('backToReading') : t('modelConnection')}</span>
         </button>
-        <button aria-label="备份" title="备份" disabled={busy}
+        <button aria-label={t('backup')} title={t('backup')} disabled={busy}
           onClick={() => run(async () => download(await api('backup', { blob: true }), 'papermaster-backup.tar.gz'))}>
-          <ArrowDownToLine size={16}/><span className="topbar-label">备份</span></button>
-        <button className="primary" aria-expanded={showImport || (ready && !paper && !['connections', 'methods'].includes(tab))}
-          onClick={() => setShowImport(value => !value)}><Plus size={16}/>导入论文</button>
+          <ArrowDownToLine size={16}/><span className="topbar-label">{t('backup')}</span></button>
+        <button className="primary" aria-expanded={guide === 'open' ? guideStep === 0 : showImport || (ready && !paper && !['connections', 'methods'].includes(tab))}
+          onClick={() => guide === 'open' ? setGuideStep(0) : setShowImport(value => !value)}><Plus size={16}/>{t('importPaper')}</button>
       </nav>
     </header>
     <aside className="rail" aria-labelledby="library-label">
       <div className="rail-content">
-        <div className="rail-heading" id="library-label">本地论文库 <span>{library.papers.length}</span></div>
+        <div className="rail-heading" id="library-label">{t('library')} <span>{library.papers.length}</span></div>
         <div className="library-search-field"><Search size={16} aria-hidden="true"/>
-          <input className="library-search" aria-label="搜索论文库" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="标题或论文链接"/>
+          <input className="library-search" aria-label={t('searchLibrary')} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('searchPlaceholder')}/>
         </div>
-        <nav aria-label="论文库">{foundPapers.map(item => <button key={item.id} aria-current={item.id === selected ? 'page' : undefined} onClick={() => select(item.id)}>
+        <nav aria-label={t('paperLibraryNav')}>{foundPapers.map(item => <button key={item.id} aria-current={item.id === selected ? 'page' : undefined} onClick={() => select(item.id)}>
           <FileText size={15}/><span>{item.title}</span></button>)}</nav>
-        {query.trim() && !foundPapers.length && <p className="rail-empty muted">没有匹配的论文。</p>}
+        {query.trim() && !foundPapers.length && <p className="rail-empty muted">{t('noMatch')}</p>}
       </div>
     </aside>
     <main id="paper-workspace" tabIndex={-1}>
-      {error && <div className="error global" role="alert">{error}<button onClick={() => setError('')}>关闭</button></div>}
-      {(showImport || (ready && !paper && !['connections', 'methods'].includes(tab))) && <ImportPaper isMain={!paper && tab !== 'connections'} onError={setError} onPaper={async result => {
+      {error && <div className="error global" role="alert">{error}<button onClick={() => setError('')}>{t('close')}</button></div>}
+      {guide === 'pending' && <p role="status">{t('loadingLibrary')}</p>}
+      {guide === 'open' && <FirstReading step={guideStep} onStep={setGuideStep} paper={paper} connections={library.connections}
+        onSkip={skipGuide}
+        importPanel={<ImportPaper isMain={false} onError={setError} onPaper={async result => { await reload(); select(result.id); }}/>}
+        connectPanel={<ProviderForm library={library} catalog={guideCatalog} onSaved={async item => { await reload(); setConnection(item.id); }}/>}
+        readingPanel={<StartReading key={paper?.id} {...{ paper, library, connection, setConnection, onJob: finishGuide, onChanged: reload, onError: setError }}/>}/>}
+      {guide === 'workbench' && <>
+      {(showImport || (!paper && !['connections', 'methods'].includes(tab))) && <ImportPaper isMain={!paper && tab !== 'connections'} onError={setError} onPaper={async result => {
         await reload(); select(result.id); setShowImport(false);
       }}/>}
-      {!ready && <p role="status">正在加载论文库…</p>}
       {tab === 'connections' && <Connections library={library} onError={setError} onUpdated={reload}
         onSaved={async item => { await reload(); setConnection(item.id); }}/>}
       {tab === 'methods' && <MethodWorkspace library={library} defaultConnection={connection} onError={setError}/>}
       {paper && !['connections', 'methods'].includes(tab) && <>
         <header className="paper-header" data-compact={tab !== 'read'}>
           <div className="paper-heading">
-            <div className="eyebrow"><BookOpen size={14} aria-hidden="true"/>{paper.arxivId ? 'arXiv ' + paper.arxivId : '本地论文'}</div>
+            <div className="eyebrow"><BookOpen size={14} aria-hidden="true"/>{paper.arxivId ? 'arXiv ' + paper.arxivId : t('localPaper')}</div>
             <h1>{paper.title}</h1>
             {paper.authors && <p className="paper-authors">{paper.authors}</p>}
           </div>
           <PaperFacts paper={paper} version={visibleVersion}/>
           <div className="actions paper-actions">
-            {visibleVersion?.url && <a href={visibleVersion.url} target="_blank" rel="noreferrer">论文主页 <ArrowUpRight size={14}/></a>}
+            {visibleVersion?.url && <a href={visibleVersion.url} target="_blank" rel="noreferrer">{t('paperHome')} <ArrowUpRight size={14}/></a>}
             {visibleVersion && <button onClick={() => run(async () => download(await api(`papers/${paper.id}/pdf/${visibleVersion.id}`, { blob: true }), paper.title + '.pdf'))}>
-              下载原件</button>}
-            <details className="renamer"><summary>修改标题</summary><form className="input-row" onSubmit={event => {
+              {t('downloadOriginal')}</button>}
+            <details className="renamer"><summary>{t('editTitle')}</summary><form className="input-row" onSubmit={event => {
               event.preventDefault();
               const title = new FormData(event.currentTarget).get('title');
               run(async () => { await api(`papers/${paper.id}/title`, { method: 'PATCH', json: { title } }); await reload(); });
-            }}><input name="title" aria-label="论文标题" defaultValue={paper.title} maxLength={255} required/><button>保存</button></form></details>
+            }}><input name="title" aria-label={t('paperTitle')} defaultValue={paper.title} maxLength={255} required/><button>{t('save')}</button></form></details>
           </div>
         </header>
         {requestedPdf && <PinnedPdf paper={paper} version={requestedPdf} page={incoming.get('page')} onError={setError}/>}
         <Tabs.Root className="paper-workspace-tabs" value={tab} onValueChange={setTab}>
-          <MotionTabsList className="tabs" value={tab} aria-label="论文工作区">
-            <Tabs.Trigger value="read">阅读</Tabs.Trigger><Tabs.Trigger value="result" disabled={!current}>当前任务</Tabs.Trigger>
-            <Tabs.Trigger value="history">阅读记录</Tabs.Trigger><Tabs.Trigger value="note">主笔记</Tabs.Trigger>
+          <MotionTabsList className="tabs" value={tab} aria-label={t('paperWorkspace')}>
+            <Tabs.Trigger value="read">{t('tabRead')}</Tabs.Trigger><Tabs.Trigger value="result" disabled={!current}>{t('tabResult')}</Tabs.Trigger>
+            <Tabs.Trigger value="history">{t('tabHistory')}</Tabs.Trigger><Tabs.Trigger value="note">{t('tabNote')}</Tabs.Trigger>
           </MotionTabsList>
           <Tabs.Content value="read"><StartReading key={paper.id} {...{ paper, library, connection, setConnection, onJob, onChanged: reload, onError: setError }}/></Tabs.Content>
           <Tabs.Content value="result">{current && <JobView key={current.id} job={current} {...{ paper, library, onJob, onError: setError, onNote: () => setNoteSignal(value => value + 1) }}/>}</Tabs.Content>
           <Tabs.Content value="history"><section className="panel">
-            <h2>阅读记录</h2>
+            <h2>{t('historyHeading')}</h2>
             {library.jobs.filter(item => item.references[0]?.id === paper.id).map(item => <button className="history" key={item.id}
               onClick={() => run(async () => onJob(await api('jobs/' + item.id)))}>
-              <strong>{library.modes[item.mode]}{item.interactive && ' · 交互版'}</strong><span>{stateLabels[item.status]} · {new Date(item.updated).toLocaleString()}</span><ChevronRight size={16}/>
+              <strong>{t('mode.' + item.mode)}{item.interactive && t('interactiveMark')}</strong><span>{t('status.' + item.status)} · {new Date(item.updated).toLocaleString()}</span><ChevronRight size={16}/>
             </button>)}
-            {!library.jobs.some(item => item.references[0]?.id === paper.id) && <p className="muted">该论文还没有阅读记录。</p>}
+            {!library.jobs.some(item => item.references[0]?.id === paper.id) && <p className="muted">{t('historyEmpty')}</p>}
           </section></Tabs.Content>
           <Tabs.Content value="note"><Note key={paper.id} paper={paper} jobs={library.jobs} onError={setError} revisionSignal={noteSignal}/></Tabs.Content>
         </Tabs.Root>
       </>}
+      </>}
     </main>
-  </div>;
+  </div></LocaleProvider>;
 }
 
 function PaperFacts({ paper, version }) {
+  const { t } = useLocale();
   if (!version) return null;
-  return <dl className="paper-facts" aria-label="论文资料">
-    <div><dt>版本</dt><dd title={version.arxivVersion || version.name}>{version.arxivVersion || version.name}</dd></div>
-    <div><dt>页数</dt><dd>{version.pages}</dd></div>
-    <div><dt>仓库快照</dt><dd>{paper.repos.length}</dd></div>
+  return <dl className="paper-facts" aria-label={t('paperFacts')}>
+    <div><dt>{t('version')}</dt><dd title={version.arxivVersion || version.name}>{version.arxivVersion || version.name}</dd></div>
+    <div><dt>{t('pages')}</dt><dd>{version.pages}</dd></div>
+    <div><dt>{t('repoSnapshots')}</dt><dd>{paper.repos.length}</dd></div>
   </dl>;
 }
 
 function PinnedPdf({ paper, version, page, onError }) {
+  const { t } = useLocale();
   const [href, setHref] = useState('');
   useEffect(() => {
     let source;
@@ -729,10 +794,34 @@ function PinnedPdf({ paper, version, page, onError }) {
     };
   }, [paper.id, version.id, page, onError]);
   return <section className="panel">
-    <h2>原始论文证据</h2>
-    <p>{version.arxivVersion || version.name}{page && ' · 第 ' + page + ' 页'}</p>
-    {href ? <a href={href} target="_blank" rel="noreferrer">打开对应版本 PDF</a> : <p role="status">正在加载原论文…</p>}
+    <h2>{t('originalEvidence')}</h2>
+    <p>{version.arxivVersion || version.name}{page && t('pageSuffix', { page })}</p>
+    {href ? <a href={href} target="_blank" rel="noreferrer">{t('openPdf')}</a> : <p role="status">{t('loadingPdf')}</p>}
   </section>;
+}
+
+function LanguageSettings({ language, busy, onChange, onError }) {
+  const { t } = useLocale();
+  const [run, saving] = useAction(onError);
+  const current = language || { interface: 'zh', generation: null };
+  return <fieldset className="language-settings">
+    <legend>{t('languageSettings')}</legend>
+    <label>{t('interfaceLanguage')}
+      <select aria-label={t('interfaceLanguage')} value={current.interface} disabled={busy || saving}
+        onChange={event => run(() => onChange({ interface: event.target.value }))}>
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+    <label>{t('generationLanguage')}
+      <select aria-label={t('generationLanguage')} value={current.generation || ''} disabled={busy || saving}
+        onChange={event => run(() => onChange({ generation: event.target.value || null }))}>
+        <option value="">{t('followInterface')}</option>
+        <option value="zh">中文</option>
+        <option value="en">English</option>
+      </select>
+    </label>
+  </fieldset>;
 }
 
 createRoot(document.getElementById('root')).render(<App/>);
