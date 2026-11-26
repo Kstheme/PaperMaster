@@ -39,7 +39,7 @@ export function useCodexCatalog(enabled, revision = 0) {
     setCatalog({ models: [], loading: true });
     api('connections/codex/models' + (revision ? '?refresh' : ''), { signal: controller.signal })
       .then(({ models }) => {
-        if (!controller.signal.aborted) setCatalog(models.length ? { models } : { models, error: 'Codex 没有返回可选模型。' });
+        if (!controller.signal.aborted) setCatalog(models.length ? { models } : { models, empty: true });
       })
       .catch(error => {
         if (!controller.signal.aborted) setCatalog({ models: [], error: error.message });

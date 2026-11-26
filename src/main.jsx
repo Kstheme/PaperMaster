@@ -69,15 +69,17 @@ function ImportPaper({ onPaper, onError, isMain }) {
 }
 
 function CodexModelField({ catalog, value, onChange }) {
-  return <label>Codex 模型
-    {catalog.error ? <input name="model" value={value} onChange={event => onChange(event.target.value)}
-      maxLength={180} placeholder="留空时沿用本机 Codex 配置"/>
+  const { t } = useLocale();
+  const manual = catalog.error || catalog.empty;
+  return <label>{t('codexModel')}
+    {manual ? <input name="model" value={value} onChange={event => onChange(event.target.value)}
+      maxLength={180} placeholder={t('codexModelPlaceholder')}/>
       : <select name="model" value={value} onChange={event => onChange(event.target.value)}>
-        <option value="">沿用本机 Codex 配置</option>
+        <option value="">{t('useLocalCodex')}</option>
         {catalog.models.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-        {value && !catalog.models.some(item => item.id === value) && <option value={value}>{value}（已配置）</option>}
+        {value && !catalog.models.some(item => item.id === value) && <option value={value}>{value}{t('configuredSuffix')}</option>}
       </select>}
-    {catalog.loading && <span role="status">正在读取 Codex 模型…</span>}
+    {catalog.loading && <span role="status">{t('readingCodexModels')}</span>}
   </label>;
 }
 
@@ -88,9 +90,10 @@ function ProviderForm({ library, catalog, onSaved }) {
   const [feedback, setFeedback] = useState('');
   const [run, busy] = useAction(setFeedback);
   const [keyMode, setKeyMode] = useState('key');
+  const { language, t } = useLocale();
   const definition = library.providers[provider];
   return <section className="panel">
-    <h2>模型连接</h2>
+    <h2>{t('modelConnection')}</h2>
     <form className="settings-form" onSubmit={event => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -102,31 +105,31 @@ function ProviderForm({ library, catalog, onSaved }) {
         setCodexModel('');
         setEffort('default');
         await onSaved(connection);
-        setFeedback('已添加模型连接。');
+        setFeedback('connectionAdded');
       });
     }}>
-      <label>接入方式<select name="provider" value={provider} onChange={event => setProvider(event.target.value)}>
-        {Object.entries(library.providers).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}
+      <label>{t('accessMethod')}<select name="provider" value={provider} onChange={event => setProvider(event.target.value)}>
+        {Object.entries(library.providers).map(([id]) => <option key={id} value={id}>{t('provider.' + id)}</option>)}
       </select></label>
-      <label>连接名称<input name="label" placeholder={definition?.label}/></label>
+      <label>{t('connectionName')}<input name="label" placeholder={t('provider.' + provider)}/></label>
       {provider === 'codex' ? <CodexModelField catalog={catalog} value={codexModel} onChange={setCodexModel}/>
-        : <label>模型名<input name="model" required placeholder="输入服务商提供的模型标识"/></label>}
+        : <label>{t('modelName')}<input name="model" required placeholder={t('modelNamePlaceholder')}/></label>}
       {provider === 'codex' && <>
-        <EffortField connection={{ provider, model: codexModel }} catalog={catalog} value={effort} onChange={setEffort} label="默认思考强度"/>
-        <p className="muted">使用本机 Codex CLI。首次使用请安装 CLI 并运行 <code>codex login</code>。</p>
+        <EffortField connection={{ provider, model: codexModel }} catalog={catalog} value={effort} onChange={setEffort} localize label={t('defaultEffortLabel')}/>
+        <p className="muted">{t('codexCliHint')} <code>codex login</code>{language === 'en' ? '.' : '。'}</p>
       </>}
-      {provider === 'compatible' && <label>Base URL<input name="base" type="url" required placeholder="https://服务商/v1"/></label>}
+      {provider === 'compatible' && <label>Base URL<input name="base" type="url" required placeholder="https://example.com/v1"/></label>}
       {provider !== 'codex' && <>
-        <label>凭证来源<select value={keyMode} onChange={event => setKeyMode(event.target.value)}>
-          <option value="key">本机系统凭证</option><option value="env">环境变量</option>
+        <label>{t('credentialSource')}<select value={keyMode} onChange={event => setKeyMode(event.target.value)}>
+          <option value="key">{t('systemCredential')}</option><option value="env">{t('envVar')}</option>
         </select></label>
         {keyMode === 'key'
           ? <label>API Key<input type="password" autoComplete="off" name="key" required/></label>
-          : <label>环境变量名<input key={provider} name="env" defaultValue={definition?.env} required/></label>}
+          : <label>{t('envVarName')}<input key={provider} name="env" defaultValue={definition?.env} required/></label>}
       </>}
-      <div className="actions"><button className="primary" disabled={busy || !definition}>添加连接</button></div>
+      <div className="actions"><button className="primary" disabled={busy || !definition}>{t('addConnection')}</button></div>
     </form>
-    {feedback && <p role="status" className="message">{feedback}</p>}
+    {feedback && <p role="status" className="message">{t(feedback)}</p>}
   </section>;
 }
 
@@ -134,6 +137,7 @@ function CodexModelEditor({ connection, catalog, onSaved, onError }) {
   const [model, setModel] = useState(connection.model || '');
   const [effort, setEffort] = useState(connection.effort || 'default');
   const [run, busy] = useAction(onError);
+  const { t } = useLocale();
   return <form className="codex-model-editor" onSubmit={event => {
     event.preventDefault();
     run(async () => {
@@ -142,57 +146,63 @@ function CodexModelEditor({ connection, catalog, onSaved, onError }) {
     });
   }}>
     <CodexModelField catalog={catalog} value={model} onChange={setModel}/>
-    <EffortField connection={{ ...connection, model }} catalog={catalog} value={effort} onChange={setEffort} label="默认思考强度"/>
-    <button disabled={busy || (model.trim() === (connection.model || '') && effort === (connection.effort || 'default'))}>保存模型设置</button>
+    <EffortField connection={{ ...connection, model }} catalog={catalog} value={effort} onChange={setEffort} localize label={t('defaultEffortLabel')}/>
+    <button disabled={busy || (model.trim() === (connection.model || '') && effort === (connection.effort || 'default'))}>{t('saveModelSettings')}</button>
   </form>;
 }
 
 function Connections({ library, onSaved, onUpdated, onError }) {
   const [run, busy] = useAction(onError);
-  const [probe, setProbe] = useState('');
+  const [probe, setProbe] = useState(null);
   const [revision, setRevision] = useState(0);
   const catalog = useCodexCatalog(true, revision);
+  const { t } = useLocale();
+  const catalogMessage = catalog.empty ? t('codexNoModels') : catalog.error;
   return <>
-    {catalog.error && <div className="actions catalog-error" role="status">
-      <p className="muted">{catalog.error} 可以手动填写 Codex 模型名。</p>
-      <button onClick={() => setRevision(value => value + 1)}>重新获取列表</button>
+    {catalogMessage && <div className="actions catalog-error" role="status">
+      <p className="muted">{t('codexManual', { error: catalogMessage })}</p>
+      <button onClick={() => setRevision(value => value + 1)}>{t('refreshModelList')}</button>
     </div>}
     <div className="two-panels">
       <ProviderForm library={library} catalog={catalog} onSaved={onSaved}/>
     <section className="panel">
-      <h2>已添加的连接</h2>
-      {library.connections.length === 0 && <p className="muted">添加一个连接后即可生成阅读内容。</p>}
+      <h2>{t('addedConnections')}</h2>
+      {library.connections.length === 0 && <p className="muted">{t('addConnectionHint')}</p>}
       {library.connections.length > 0 && !library.defaultConnection &&
-        <p className="muted">当前没有默认连接。下次生成前，请从现存连接里选择。</p>}
+        <p className="muted">{t('noDefaultConnection')}</p>}
       <ul className="connection-list">{library.connections.map(connection => <li key={connection.id}>
-        <div><strong>{connection.label}</strong> <small>{connection.id === library.defaultConnection ? '默认' : ''}</small><p className="muted">{connection.model || '本机配置模型'}</p></div>
+        <div><strong>{connection.label}</strong> <small>{connection.id === library.defaultConnection ? t('defaultBadge') : ''}</small><p className="muted">{connection.model || t('localConfiguredModel')}</p></div>
         <div className="actions">
           <button disabled={busy} onClick={() => run(async () => {
-            setProbe('正在检查 ' + connection.label + '…');
+            setProbe({ key: 'checkingConnection', label: connection.label });
             try {
               const report = await api(`connections/${connection.id}/check`, { method: 'POST' });
               const limit = report.limits?.primary;
-              setProbe(connection.label + (report.mode === 'chatgpt' ? `：ChatGPT 已登录${limit?.usedPercent != null ? `，当前窗口已用 ${limit.usedPercent}%` : '，用量未知'}` : '：模型已响应 ' + report.model));
-            } catch (error) { setProbe(''); throw error; }
-          })}>检查</button>
+              setProbe(report.mode === 'chatgpt'
+                ? (limit?.usedPercent != null
+                  ? { key: 'chatgptSignedIn', label: connection.label, percent: limit.usedPercent }
+                  : { key: 'chatgptUsageUnknown', label: connection.label })
+                : { key: 'modelResponded', label: connection.label, model: report.model });
+            } catch (error) { setProbe(null); throw error; }
+          })}>{t('checkConnection')}</button>
           <button disabled={busy || connection.id === library.defaultConnection} onClick={() => run(async () => {
             await api('connections/default', { method: 'PUT', json: { connectionId: connection.id } });
             await onSaved(connection);
-          })}>设为默认</button>
+          })}>{t('setDefault')}</button>
           <button disabled={busy} onClick={() => {
-            if (!confirm(`删除连接「${connection.label}」？排队或正在运行的任务会继续，结束后才能删除。已有阅读和模型出处会保留。`)) return;
+            if (!confirm(t('deleteConnectionConfirm', { label: connection.label }))) return;
             run(async () => {
               const wasDefault = connection.id === library.defaultConnection;
               await api(`connections/${connection.id}`, { method: 'DELETE' });
-              setProbe(wasDefault ? '已删除默认连接。下次生成前请重新选择一个现存连接。' : '已删除该连接。');
+              setProbe({ key: wasDefault ? 'deletedDefaultConnection' : 'deletedConnection' });
               await onUpdated();
             });
-          }}>删除</button>
+          }}>{t('deleteConnection')}</button>
         </div>
         {connection.provider === 'codex' && <CodexModelEditor key={connection.model} connection={connection}
           catalog={catalog} onSaved={onUpdated} onError={onError}/>}
       </li>)}</ul>
-      <p className="muted" role="status">{probe}</p>
+      <p className="muted" role="status">{probe ? t(probe.key, probe) : ''}</p>
     </section>
     </div>
   </>;
@@ -322,6 +332,7 @@ function Note({ paper, jobs, onError, revisionSignal }) {
   const [proposal, setProposal] = useState(null);
   const [candidate, setCandidate] = useState('');
   const [run, busy] = useAction(onError);
+  const { t } = useLocale();
   const path = `papers/${paper.id}/note`;
   const snippets = jobs.filter(job => job.status === 'completed' && job.mode !== 'compare' && job.references[0]?.id === paper.id)
     .flatMap(job => job.sections.map(section => ({ value: job.id + ':' + section.key, label: section.title })));
@@ -331,7 +342,7 @@ function Note({ paper, jobs, onError, revisionSignal }) {
   }, [path]);
   useEffect(() => { load().catch(error => onError(error.message)); }, [load, onError, revisionSignal]);
   return <section className="panel">
-    <h2>主笔记</h2>
+    <h2>{t('tabNote')}</h2>
     <label htmlFor="note-text" className="muted">Markdown</label>
     <textarea id="note-text" className="note-editor" rows="16" value={text} disabled={version === null}
       onSelect={event => {
@@ -342,35 +353,35 @@ function Note({ paper, jobs, onError, revisionSignal }) {
     <div className="actions">
       <button className="primary" disabled={busy || text === saved || !version} onClick={() => run(async () => {
         const note = await api(path, { method: 'PUT', json: { markdown: text, revision: version } });
-        setVersion(note.revision); setSaved(note.markdown); setMessage('已保存');
-      })}>保存笔记</button>
-      <button onClick={() => download(markdownBlob(text), paper.title + '.md')}><ArrowDownToLine size={15}/>导出 Markdown</button>
+        setVersion(note.revision); setSaved(note.markdown); setMessage('noteSaved');
+      })}>{t('saveNote')}</button>
+      <button onClick={() => download(markdownBlob(text), paper.title + '.md')}><ArrowDownToLine size={15}/>{t('exportMarkdown')}</button>
       <button disabled={busy} onClick={() => {
-        if (text === saved || confirm('重新载入会丢弃当前未保存的编辑。是否继续？')) run(load);
-      }}>重新载入</button>
-      <span className="muted" role="status">{message || (text !== saved && '有未保存编辑')}</span>
+        if (text === saved || confirm(t('reloadConfirm'))) run(load);
+      }}>{t('reloadNote')}</button>
+      <span className="muted" role="status">{message ? t(message) : (text !== saved && t('unsavedEdits'))}</span>
     </div>
-    {saved && <details className="note-render"><summary>查看已保存笔记与出处</summary><Markdown>{saved}</Markdown></details>}
+    {saved && <details className="note-render"><summary>{t('viewSavedNote')}</summary><Markdown>{saved}</Markdown></details>}
     {snippets.length > 0 && <details className="replace">
-      <summary>用阅读成果替换选中的笔记片段</summary>
-      <p className="muted">在编辑框中选中要替换的文字，再选择一段已生成的小节。</p>
-      <div className="actions"><select aria-label="替换来源" value={candidate} onChange={event => { setCandidate(event.target.value); setProposal(null); }}>
-        <option value="">选择已生成小节</option>{snippets.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+      <summary>{t('replaceSnippet')}</summary>
+      <p className="muted">{t('replaceHint')}</p>
+      <div className="actions"><select aria-label={t('replaceSource')} value={candidate} onChange={event => { setCandidate(event.target.value); setProposal(null); }}>
+        <option value="">{t('chooseSection')}</option>{snippets.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
       </select>
       <button disabled={!selection || !candidate || busy} onClick={() => run(async () => {
         const [jobId, key] = candidate.split(':');
         const result = await api('jobs/' + jobId);
         const snippet = result.sections.find(section => section.key === key);
         if (snippet?.markdown) setProposal({ ...selection, replacement: snippet.markdown });
-      })}>预览替换</button></div>
+      })}>{t('previewReplace')}</button></div>
       {proposal && <div className="proposal">
-        <h3>原片段</h3><pre>{proposal.target}</pre>
-        <h3>拟替换为</h3><Markdown>{proposal.replacement}</Markdown>
+        <h3>{t('originalSnippet')}</h3><pre>{proposal.target}</pre>
+        <h3>{t('proposedReplacement')}</h3><Markdown>{proposal.replacement}</Markdown>
         <button onClick={() => {
-          if (text.slice(proposal.start, proposal.end) !== proposal.target) return onError('选中的原片段已修改，请重新选择。');
+          if (text.slice(proposal.start, proposal.end) !== proposal.target) return onError(t('selectionChanged'));
           setText(text.slice(0, proposal.start) + proposal.replacement + text.slice(proposal.end));
-          setProposal(null); setSelection(null); setMessage('已应用到编辑框，保存后写入主笔记。');
-        }}>应用到编辑框</button>
+          setProposal(null); setSelection(null); setMessage('appliedToEditor');
+        }}>{t('applyToEditor')}</button>
       </div>}
     </details>}
   </section>;
