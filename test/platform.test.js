@@ -576,6 +576,96 @@ test('startup recovers an active job as interrupted', async t => {
   } finally { await app.close(); }
 });
 
+test('deep-read generation language follows the interface unless overridden', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-language-'));
+  const prompts = [];
+  const remoteFetch = async (url, options) => {
+    prompts.push(JSON.parse(options.body).input);
+    return fixtureStream(url, { summary: 'kept', takeaways: ['one'], markdown: 'stored reading body' });
+  };
+  const app = await createApp({ directory, remoteFetch });
+  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function call(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, {
+      method,
+      headers: { 'x-papermaster-session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }),
+    });
+    const value = response.headers.get('content-type')?.includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(value));
+    return value;
+  }
+  async function finish(id) {
+    for (let index = 0; index < 80; index += 1) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(20);
+    }
+    throw new Error('deep read did not finish');
+  }
+  function takePrompts() {
+    const batch = prompts.splice(0, prompts.length);
+    assert.equal(batch.length, 6);
+    return batch;
+  }
+
+  assert.deepEqual((await call('library')).language, { interface: 'zh', generation: null, effective: 'zh' });
+  const uploaded = await fetch(app.url + '/api/papers?name=language.pdf', {
+    method: 'POST', headers: { 'x-papermaster-session': token, 'content-type': 'application/pdf' },
+    body: pdf('Language paper', 'This article describes algorithms experiments and an attention mechanism using evaluated methods and assumptions.'),
+  });
+  assert.equal(uploaded.status, 201);
+  const paper = await uploaded.json();
+  const connection = await call('connections', { method: 'POST', json: { provider: 'openai', model: 'fixture', key: 'fixture-key' }, status: 201 });
+  assert.equal((await call('library')).defaultConnection, connection.id);
+
+  const chinese = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  assert.equal(chinese.status, 'completed');
+  assert.equal(chinese.generationLanguage, 'zh');
+  assert.equal(chinese.sections[0].title, '论文速览');
+  assert.equal(chinese.sections[0].markdown, 'stored reading body');
+  const defaultPrompts = takePrompts();
+  assert.ok(defaultPrompts.every(prompt => prompt.includes('使用中文，保留关键英文术语。') && !prompt.includes('Write in English.')));
+  assert.match(defaultPrompts[0], /当前小节：论文速览。/);
+
+  const followed = await call('settings/language', { method: 'PUT', json: { interface: 'en' } });
+  assert.deepEqual(followed, { interface: 'en', generation: null, effective: 'en' });
+  assert.equal((await call('library')).defaultConnection, connection.id);
+  const note = await call('papers/' + paper.id + '/note');
+  const handwritten = await call('papers/' + paper.id + '/note', {
+    method: 'PUT', json: { markdown: note.markdown + '\n\nHandwritten note stays put.', revision: note.revision },
+  });
+  const english = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  const englishPrompts = takePrompts();
+  assert.equal(english.generationLanguage, 'en');
+  assert.equal(english.sections[0].title, 'Paper overview');
+  assert.ok(englishPrompts.every(prompt => prompt.includes('Write in English.') && !prompt.includes('使用中文')));
+  assert.match(englishPrompts[0], /Section: Paper overview\./);
+
+  const override = await call('settings/language', { method: 'PUT', json: { generation: 'zh' } });
+  assert.deepEqual(override, { interface: 'en', generation: 'zh', effective: 'zh' });
+  const chineseAgain = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  const overridePrompts = takePrompts();
+  assert.equal(chineseAgain.generationLanguage, 'zh');
+  assert.equal(chineseAgain.sections[0].title, '论文速览');
+  assert.ok(overridePrompts.every(prompt => prompt.includes('使用中文，保留关键英文术语。') && !prompt.includes('Write in English.')));
+  assert.match(overridePrompts[0], /当前小节：论文速览。/);
+
+  const preserved = await call('jobs/' + chinese.id);
+  assert.equal(preserved.sections[0].markdown, 'stored reading body');
+  assert.equal(preserved.sections[0].title, '论文速览');
+  assert.equal((await call('papers/' + paper.id + '/note')).markdown, handwritten.markdown);
+  assert.equal((await call('library')).papers.find(item => item.id === paper.id).title, paper.title);
+  assert.equal((await call('settings/language', { method: 'PUT', json: { interface: 'fr' }, status: 400 })).error, '请选择界面语言。');
+});
+
 test('import targets accept only the supported public hosts', () => {
   assert.equal(arxivLink('https://arxiv.org/pdf/1706.03762v7.pdf').baseId, '1706.03762');
   assert.equal(githubLink('https://github.com/tensorflow/tensor2tensor.git'), 'https://github.com/tensorflow/tensor2tensor');
