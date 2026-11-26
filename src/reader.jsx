@@ -8,11 +8,12 @@ import { EffortInfo, EvidenceLinks } from './workbench-fields.jsx';
 import { RepositoryReading } from './interaction-reader.jsx';
 import { readingHighlightColors } from '../server/highlight-anchor.js';
 import { paintReadingHighlights, selectionAnchor, selectionBox } from './reading-highlights.js';
+import { HighlightAnnotation } from './highlight-annotation.jsx';
 import { readingFigureParts, splitReadingMarkdown } from '../server/reading-markdown.js';
 
 const Softmax = lazy(() => import('./softmax.jsx'));
 
-export function Reader({ id, sections, onAppend, busy, figures, renderFigure, onTool, repo }) {
+export function Reader({ id, sections, onAppend, busy, figures, renderFigure, onTool, repo, onNote, canAppendNote = false }) {
   const storageKey = 'papermaster.chapter.' + id;
   const [selected, setSelected] = useState(() => localStorage.getItem(storageKey));
   const activeIndex = Math.max(0, sections.findIndex(item => item.key === selected));
@@ -24,7 +25,11 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   const [highlights, setHighlights] = useState([]);
   const [toolbar, setToolbar] = useState(null);
   const [highlightError, setHighlightError] = useState('');
-  const incoming = new URLSearchParams(window.location.search);
+  const [annotationId, setAnnotationId] = useState(null);
+  const linkedHighlight = useRef(new URLSearchParams(window.location.search));
+  const appliedLink = useRef(false);
+  const scrolledAnnotation = useRef('');
+  const incoming = linkedHighlight.current;
   const initialStep = incoming.get('job') === id && incoming.get('chapter') === active.key ? incoming.get('step') : null;
 
   useEffect(() => {
@@ -35,12 +40,35 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
     return () => { ignore = true; };
   }, [id]);
 
+  useEffect(() => {
+    const linkedJob = incoming.get('job');
+    const linkedId = linkedJob === id ? incoming.get('highlight') : '';
+    if (!linkedId || appliedLink.current) return;
+    const item = highlights.find(entry => entry.id === linkedId);
+    if (!item) return;
+    appliedLink.current = true;
+    if (item.section !== active.key) {
+      setSelected(item.section);
+      localStorage.setItem(storageKey, item.section);
+    }
+    setAnnotationId(item.id);
+  }, [highlights, active.key, id, incoming, storageKey]);
+
   useLayoutEffect(() => {
     const root = bodyRef.current;
     if (!root) return undefined;
     paintReadingHighlights(root, highlights.filter(item => item.section === active.key));
+    const token = (annotationId || '') + ':' + active.key;
+    if (!annotationId) scrolledAnnotation.current = '';
+    else if (scrolledAnnotation.current !== token) {
+      const mark = root.querySelector(`mark.reading-highlight[data-highlight-id="${CSS.escape(annotationId)}"]`);
+      if (mark) {
+        mark.scrollIntoView({ block: 'nearest' });
+        scrolledAnnotation.current = token;
+      }
+    }
     return () => paintReadingHighlights(root, []);
-  }, [highlights, active.key, active.markdown]);
+  }, [highlights, active.key, active.markdown, annotationId]);
 
   useEffect(() => {
     const show = () => {
@@ -102,6 +130,57 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   function select(key) {
     setSelected(key);
     localStorage.setItem(storageKey, key);
+    setAnnotationId(current => {
+      const item = highlights.find(entry => entry.id === current);
+      return item && item.section === key ? current : null;
+    });
+  }
+
+  function rememberHighlight(saved) {
+    setHighlights(items => items.map(item => item.id === saved.id ? saved : item));
+  }
+
+  function openHighlight(item) {
+    if (!item || item.section !== active.key) return;
+    setToolbar(null);
+    window.getSelection()?.removeAllRanges();
+    setAnnotationId(item.id);
+  }
+
+  function openFromMark(event) {
+    const mark = event.target instanceof Element ? event.target.closest('mark.reading-highlight') : null;
+    if (!mark || !article.current?.contains(mark)) return;
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    if (event.type === 'click') {
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+    } else event.preventDefault();
+    const item = highlights.find(entry => entry.id === mark.dataset.highlightId);
+    openHighlight(item);
+  }
+
+  async function startAnnotation() {
+    const anchor = toolbar?.anchor;
+    if (!anchor || saving.current) return;
+    const existing = highlights.find(item => item.section === active.key && item.start === anchor.start
+      && item.end === anchor.end && item.quote === anchor.quote);
+    if (existing) {
+      openHighlight(existing);
+      return;
+    }
+    saving.current = true;
+    setHighlightError('');
+    try {
+      const saved = await api('jobs/' + id + '/highlights', {
+        method: 'POST', json: { section: active.key, color: 'amber', ...anchor },
+      });
+      setHighlights(items => items.some(item => item.id === saved.id) ? items : [...items, saved]);
+      openHighlight(saved);
+    } catch (error) {
+      setHighlightError(error.message || '阅读高亮没有保存。');
+    } finally {
+      saving.current = false;
+    }
   }
 
   function turnPage(index) {
@@ -109,7 +188,8 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
     requestAnimationFrame(() => heading.current?.focus());
   }
 
-  return <Tabs.Root className={figures ? 'reader reader-inline' : 'reader'} value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
+  const annotation = highlights.find(item => item.id === annotationId && item.section === active.key) || null;
+  return <Tabs.Root className={['reader', figures ? 'reader-inline' : '', annotation ? 'reader-with-annotation' : ''].filter(Boolean).join(' ')} value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
     {sections.length > 1 && <nav className="reader-index" aria-label="阅读目录">
       <h3>阅读目录</h3>
       <Tabs.List className="chapter-tabs" aria-label="选择章节">
@@ -117,7 +197,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
       </Tabs.List>
     </nav>}
     <Tabs.Content key={active.key} value={active.key} className="reader-content" asChild>
-      <article ref={article}>
+      <article ref={article} onClick={openFromMark} onKeyDown={openFromMark}>
         <div className="chapter-header">
           <div><h2 ref={heading} tabIndex={-1}>{active.title}</h2><EffortInfo entry={active}/>
             {active.model && <p className="muted">模型 · {active.model}</p>}</div>
@@ -134,6 +214,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
           <span className="reading-highlight-label">阅读高亮</span>
           {readingHighlightColors.map(color => <button key={color.id} type="button" data-color={color.id} aria-label={color.label} title={color.label}
             onClick={() => chooseColor(color.id)}/>)}
+          <button type="button" className="reading-highlight-write" onClick={startAnnotation}>写批注</button>
         </div>}
         {active.searched && <aside className="repo-reading-evidence">
           <h3>本章证据</h3>
@@ -146,6 +227,8 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
         </nav>}
       </article>
     </Tabs.Content>
+    {annotation && <HighlightAnnotation key={annotation.id} jobId={id} highlight={annotation} canAppend={canAppendNote}
+      onChange={rememberHighlight} onClose={() => setAnnotationId(null)} onNote={onNote}/>}
   </Tabs.Root>;
 }
 

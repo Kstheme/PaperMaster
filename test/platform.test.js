@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -902,6 +902,115 @@ test('a reading highlight is stored on its reading record and restored after rel
   assert.notEqual(other.id, created.id);
   assert.deepEqual(await request('jobs/' + jobA + '/highlights'), [created]);
   assert.deepEqual(await request('jobs/' + jobB + '/highlights'), [other]);
+});
+
+test('a highlight annotation stays on its highlight until the reader confirms it into the main note', async t => {
+  const quote = '这段原文会被摘录';
+  const otherQuote = '另一处只做阅读高亮';
+  const draft = '批注草稿甲';
+  const revised = '批注修订乙';
+  const unconfirmed = '尚未再次确认的批注丙';
+  const markdown = `前文。${quote}。中间。${otherQuote}。后文。`;
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-annotation-'));
+  let app;
+  t.after(async () => {
+    await app?.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
+  const paperId = randomUUID();
+  const versionId = randomUUID();
+  const jobA = randomUUID();
+  const jobB = randomUUID();
+  const section = { key: 'overview', title: '论文速览', markdown };
+  const library = await openLibrary(directory);
+  library.put('papers', { id: paperId, title: '批注论文', versionId, versions: [{ id: versionId, name: 'v1.pdf', pages: 1 }], repos: [] });
+  for (const id of [jobA, jobB]) {
+    library.put('jobs', { id, mode: 'deep', status: 'completed', updated: '2026-11-26T00:00:00.000Z',
+      references: [{ id: paperId, versionId }], sections: [{ ...section }] });
+  }
+  library.close();
+  await mkdir(join(directory, 'papers', paperId), { recursive: true });
+
+  function anchor(text, color) {
+    const start = markdown.indexOf(text);
+    return { section: 'overview', color, quote: text, prefix: markdown.slice(Math.max(0, start - 8), start),
+      suffix: markdown.slice(start + text.length, start + text.length + 8), start, end: start + text.length };
+  }
+
+  app = await createApp({ directory });
+  let token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function request(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }) });
+    const result = await response.json();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+
+  const created = await request('jobs/' + jobA + '/highlights', { method: 'POST', json: anchor(quote, 'amber'), status: 201 });
+  assert.equal(Object.hasOwn(created, 'annotation'), false);
+  const bare = await request('jobs/' + jobA + '/highlights', { method: 'POST', json: anchor(otherQuote, 'green'), status: 201 });
+  assert.equal(Object.hasOwn(bare, 'annotation'), false);
+  const before = await request('papers/' + paperId + '/note');
+  assert.equal(before.markdown.includes(draft), false);
+  assert.equal(before.markdown.includes('高亮批注'), false);
+
+  const saved = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: draft } });
+  assert.deepEqual(Object.keys(saved.annotation).sort(), ['text', 'updated']);
+  assert.equal(saved.annotation.text, draft);
+  assert.match(saved.annotation.updated, /^\d{4}-\d{2}-\d{2}T/);
+  const { annotation, ...storedHighlight } = saved;
+  assert.deepEqual(storedHighlight, created);
+  assert.equal((await request('papers/' + paperId + '/note')).markdown.includes(draft), false);
+  assert.equal(Object.hasOwn(await request('jobs/' + jobA), 'highlights'), false);
+  await request('jobs/' + jobB + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: '不属于这条阅读记录' }, status: 404 });
+  await request('jobs/' + jobA + '/highlights/' + bare.id + '/note', { method: 'POST', json: {}, status: 400 });
+  assert.equal((await request('papers/' + paperId + '/note')).markdown.includes('高亮批注'), false);
+
+  await app.close();
+  const stored = await openLibrary(directory);
+  try {
+    assert.equal(stored.get('highlights', created.id).annotation.text, draft);
+    assert.equal(Object.hasOwn(stored.get('jobs', jobA), 'highlights'), false);
+    assert.equal(Object.hasOwn(stored.get('highlights', bare.id), 'annotation'), false);
+  } finally { stored.close(); }
+
+  app = await createApp({ directory });
+  token = (await (await fetch(app.url + '/api/session')).json()).token;
+  const reloaded = (await request('jobs/' + jobA + '/highlights')).find(item => item.id === created.id);
+  assert.equal(reloaded.annotation.text, draft);
+  assert.equal(reloaded.annotation.updated, saved.annotation.updated);
+  const edited = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: revised } });
+  assert.equal(edited.annotation.text, revised);
+  assert.notEqual(edited.annotation.updated, saved.annotation.updated);
+  const stillPrivate = await request('papers/' + paperId + '/note');
+  assert.equal(stillPrivate.markdown.includes(draft), false);
+  assert.equal(stillPrivate.markdown.includes(revised), false);
+
+  const noted = await request('jobs/' + jobA + '/highlights/' + created.id + '/note', { method: 'POST', json: {} });
+  const marker = '<!-- papermaster:highlight:' + created.id + ' -->';
+  const href = `/?paper=${paperId}&job=${jobA}&chapter=overview&highlight=${created.id}`;
+  assert.equal(noted.markdown.includes(draft), false);
+  assert.ok(noted.markdown.includes(revised));
+  assert.ok(noted.markdown.includes('> ' + quote));
+  assert.ok(noted.markdown.includes('[阅读位置 · 论文速览](' + href + ')'));
+  assert.equal(noted.markdown.split(marker).length - 1, 1);
+  assert.equal((await request('papers/' + paperId + '/note')).markdown, noted.markdown);
+
+  const pending = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: unconfirmed } });
+  assert.equal(pending.annotation.text, unconfirmed);
+  const afterEdit = await request('papers/' + paperId + '/note');
+  assert.equal(afterEdit.markdown.includes(unconfirmed), false);
+  assert.ok(afterEdit.markdown.includes(revised));
+
+  const cleared = await request('jobs/' + jobA + '/highlights/' + created.id, { method: 'PATCH', json: { annotation: '' } });
+  assert.equal(Object.hasOwn(cleared, 'annotation'), false);
+  assert.equal(cleared.quote, quote);
+  const kept = await request('papers/' + paperId + '/note');
+  assert.ok(kept.markdown.includes(revised));
+  assert.equal(kept.markdown.includes(unconfirmed), false);
+  assert.equal((await request('jobs/' + jobA + '/highlights')).some(item => item.id === cleared.id && !Object.hasOwn(item, 'annotation')), true);
 });
 
 test('a fresh data directory has no preset papers and an existing library still opens', async t => {

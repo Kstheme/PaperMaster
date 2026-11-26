@@ -489,6 +489,7 @@ function JobView({ job, paper, library, onJob, onError, onNote }) {
       onTool={job.mode !== 'compare' ? openFollowup : undefined}
       figures={figures} renderFigure={(name, onTool) => <ReadingFigure name={name} job={job} repo={repo} busy={busy} onNote={onNote} onTool={onTool}
         onRetry={key => run(async () => onJob(await api(path + '/component/' + key, { method: 'POST' })))}/>}
+      onNote={onNote} canAppendNote={job.status === 'completed' && job.mode !== 'compare'}
       onAppend={job.status === 'completed' && job.mode !== 'compare' ? append : null}/>}
     {job.integratedRepo && repositoryPanel}
     {followupsOpen && <Followups job={job} library={library} intent={intent}

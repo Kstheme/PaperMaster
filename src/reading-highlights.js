@@ -74,7 +74,7 @@ export function selectionBox() {
   if (!selection?.rangeCount || selection.isCollapsed) return null;
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   if (!rect || (!rect.width && !rect.height)) return null;
-  const width = 228;
+  const width = 336;
   const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
   const top = rect.top > 52 ? rect.top - 42 : Math.min(rect.bottom + 8, window.innerHeight - 48);
   return { top, left };
@@ -123,7 +123,11 @@ function wrapSpan(nodes, start, end, highlight) {
     mark.className = 'reading-highlight';
     mark.dataset.highlightId = highlight.id;
     mark.dataset.color = highlight.color;
-    mark.title = '阅读高亮';
+    if (highlight.annotation?.text) mark.dataset.annotated = 'true';
+    mark.title = '打开高亮批注';
+    mark.setAttribute('role', 'button');
+    mark.tabIndex = 0;
+    mark.setAttribute('aria-label', '打开高亮批注');
     part.before(mark);
     mark.append(part);
   }
