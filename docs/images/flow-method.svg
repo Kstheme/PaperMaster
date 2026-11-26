@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="268" viewBox="0 0 960 268" role="img" aria-labelledby="title desc">
+  <title id="title">From papers to one confirmed snapshot</title>
+  <desc id="desc">Candidates keep each paper's practice and evidence. Keyword overlap is not enough. Records that share a mechanism sit side by side. Markdown and JSON come from the same confirmed snapshot.</desc>
+  <rect width="960" height="268" rx="16" fill="#f4f3ea"/>
+  <text x="28" y="36" fill="#3c5b3f" font-family="Consolas, ui-monospace, monospace" font-size="12" font-weight="700" letter-spacing="1.4">METHOD TABLE</text>
+  <g font-family="Georgia, Palatino, serif" font-size="15" fill="#1c251d">
+    <rect x="28" y="64" width="150" height="78" rx="12" fill="#fffdf7" stroke="#d2d8ca"/>
+    <text x="103" y="96" text-anchor="middle">Papers</text>
+    <text x="103" y="118" text-anchor="middle" fill="#535f51" font-family="Aptos, Segoe UI, sans-serif" font-size="12">with a reading</text>
+    <path d="M186 103 H214" stroke="#83907c" stroke-width="1.6"/>
+    <path d="M208 97 L218 103 L208 109" fill="none" stroke="#83907c" stroke-width="1.6"/>
+    <rect x="226" y="64" width="176" height="78" rx="12" fill="#fffdf7" stroke="#d2d8ca"/>
+    <text x="314" y="96" text-anchor="middle">Candidates</text>
+    <text x="314" y="118" text-anchor="middle" fill="#535f51" font-family="Aptos, Segoe UI, sans-serif" font-size="12">or none</text>
+    <path d="M410 103 H438" stroke="#83907c" stroke-width="1.6"/>
+    <path d="M432 97 L442 103 L432 109" fill="none" stroke="#83907c" stroke-width="1.6"/>
+    <rect x="450" y="64" width="196" height="78" rx="12" fill="#17271e"/>
+    <text x="548" y="96" text-anchor="middle" fill="#f4f3ea">Same mechanism</text>
+    <text x="548" y="118" text-anchor="middle" fill="#d7efaa" font-family="Aptos, Segoe UI, sans-serif" font-size="12">separate columns</text>
+    <path d="M654 103 H682" stroke="#83907c" stroke-width="1.6"/>
+    <path d="M676 97 L686 103 L676 109" fill="none" stroke="#83907c" stroke-width="1.6"/>
+    <rect x="694" y="64" width="238" height="78" rx="12" fill="#d7efaa"/>
+    <text x="813" y="96" text-anchor="middle">One snapshot</text>
+    <text x="813" y="118" text-anchor="middle" fill="#3c5b3f" font-family="Aptos, Segoe UI, sans-serif" font-size="12">Markdown and JSON</text>
+  </g>
+  <text x="28" y="186" fill="#535f51" font-family="Aptos, Segoe UI, sans-serif" font-size="14">A shared keyword is not enough. A mechanism with no effect check is marked, not invented.</text>
+  <text x="28" y="214" fill="#535f51" font-family="Aptos, Segoe UI, sans-serif" font-size="14">Later edits do not change a confirmed snapshot. The target task and the prediction stay downstream.</text>
+  <text x="28" y="242" fill="#3c5b3f" font-family="Aptos, Segoe UI, sans-serif" font-size="13">Effective, no clear improvement, and failure can all be kept.</text>
+</svg>

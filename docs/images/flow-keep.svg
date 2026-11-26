@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="276" viewBox="0 0 960 276" role="img" aria-labelledby="title desc">
+  <title id="title">Highlight, annotate, and ask without losing the note</title>
+  <desc id="desc">A highlight can be saved alone. A note hangs on that highlight and enters the main note only after confirmation. Deleting the highlight or the follow-up leaves text already saved in the main note.</desc>
+  <rect width="960" height="276" rx="16" fill="#f4f3ea"/>
+  <text x="28" y="36" fill="#3c5b3f" font-family="Consolas, ui-monospace, monospace" font-size="12" font-weight="700" letter-spacing="1.4">KEEP A PASSAGE</text>
+  <g font-family="Georgia, Palatino, serif" font-size="16" fill="#1c251d">
+    <rect x="28" y="62" width="150" height="64" rx="12" fill="#fffdf7" stroke="#d2d8ca"/>
+    <text x="103" y="99" text-anchor="middle">Select text</text>
+    <path d="M186 94 H214" stroke="#83907c" stroke-width="1.6"/>
+    <path d="M208 88 L218 94 L208 100" fill="none" stroke="#83907c" stroke-width="1.6"/>
+    <rect x="226" y="62" width="150" height="64" rx="12" fill="#ffd38a"/>
+    <text x="301" y="99" text-anchor="middle">Highlight</text>
+    <path d="M384 94 H412" stroke="#83907c" stroke-width="1.6"/>
+    <path d="M406 88 L416 94 L406 100" fill="none" stroke="#83907c" stroke-width="1.6"/>
+    <rect x="424" y="62" width="170" height="64" rx="12" fill="#fffdf7" stroke="#d2d8ca"/>
+    <text x="509" y="90" text-anchor="middle">Note</text>
+    <text x="509" y="110" text-anchor="middle" fill="#535f51" font-family="Aptos, Segoe UI, sans-serif" font-size="12">optional</text>
+    <path d="M602 94 H630" stroke="#83907c" stroke-width="1.6"/>
+    <path d="M624 88 L634 94 L624 100" fill="none" stroke="#83907c" stroke-width="1.6"/>
+    <rect x="642" y="62" width="290" height="64" rx="12" fill="#d7efaa"/>
+    <text x="787" y="90" text-anchor="middle">Confirm into the main note</text>
+    <text x="787" y="110" text-anchor="middle" fill="#3c5b3f" font-family="Aptos, Segoe UI, sans-serif" font-size="12">with a link back to the passage</text>
+  </g>
+  <rect x="28" y="156" width="904" height="88" rx="12" fill="#fffdf7" stroke="#d2d8ca"/>
+  <text x="48" y="190" fill="#1c251d" font-family="Georgia, Palatino, serif" font-size="16">Delete the highlight, its note, or the whole follow-up</text>
+  <text x="48" y="216" fill="#535f51" font-family="Aptos, Segoe UI, sans-serif" font-size="14">Text already saved in the main note stays. Another reading of the same paper does not show this highlight.</text>
+</svg>

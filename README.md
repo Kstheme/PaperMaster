@@ -2,50 +2,138 @@
 
 **Follow a research idea from paper to implementation.**
 
-[简体中文](README.zh-CN.md) · [Install](#install) · [Workflow](#workflow) · [Releases](https://github.com/Kstheme/PaperMaster/releases) · [npm](https://www.npmjs.com/package/papermaster-reader)
+[简体中文](README.zh-CN.md) · [Install](#install) · [Tutorial](#tutorial) · [Releases](https://github.com/Kstheme/PaperMaster/releases) · [Homepage](https://kstheme.github.io/PaperMaster/)
 
-PaperMaster is a local workspace for reading research papers. Import a PDF or an arXiv link, explore a method inside the article, and connect what you learn to the original paper, a pinned repository commit, and your own notes.
+PaperMaster is a local reading workspace. Import your own paper, read it in Chinese or English, and keep the passages, questions, and methods you decide are worth saving. The library stays on your machine.
 
 ![PaperMaster showing the Draw2Think repository walkthrough, with a geometry demo, implementation steps, and source links](docs/images/repository-workbench.webp)
 
-*Draw2Think repository reading. A teaching sample connects the paper's state and observation model to the code that returns an angle.*
+*Repository reading for Draw2Think. One teaching sample connects the paper's state and observation model to the code that returns an angle.*
 
 ## Install
 
-Requires **Node.js 22.16 or later**. Install **Git** to associate a public GitHub repository. The package ships with the built interface.
+You need **Node.js 22.16 or later**. Repository reading also needs **Git**.
 
 ```sh
 npm install -g papermaster-reader@latest
 papermaster
 ```
 
-To install a specific GitHub release, download its `papermaster-reader-<version>.tgz` from [Releases](https://github.com/Kstheme/PaperMaster/releases), then run `npm install -g ./papermaster-reader-<version>.tgz`. On Windows, use `npm.cmd` and `papermaster.cmd` if PowerShell blocks the script shims.
+The terminal prints a local address, usually `http://127.0.0.1:43947`, and opens it. To install one GitHub release instead of the latest package, download `papermaster-reader-<version>.tgz` from [Releases](https://github.com/Kstheme/PaperMaster/releases) and run `npm install -g ./papermaster-reader-<version>.tgz`. On Windows, use `npm.cmd` and `papermaster.cmd` if PowerShell blocks the shims.
 
-PaperMaster opens a browser and prints its local address. Use `papermaster --help` for the port and data-directory options.
+A second library uses its own directory and port:
 
-## Workflow
+```sh
+papermaster --data-dir ./my-library --port 43948
+```
 
-1. **Connect a model.** Open **模型连接** (Model connections). For Codex, install the Codex CLI and sign in with `codex login`. You can also configure an API provider.
-2. **Bring in a paper.** Use **导入论文** (Import paper) with an arXiv URL or a PDF that has extractable text.
-3. **Choose how to read.** Start with **泛读** (Skim), use **完整精读** (Deep reading) for methods and experiments, or use **关联仓库精读** (Repository reading) to follow the implementation at a specific commit.
-4. **Keep what matters.** Ask a follow-up from a passage or implementation step, save part of the answer to the main note, or export the reading to Markdown.
+`papermaster --help` lists the flags. `--no-open` skips the browser.
 
-## Inside the workspace
+## Tutorial
 
-| Workspace | What you can do |
+The first open, the three reading modes, and the path from a passage to a method snapshot are drawn below. The steps after each figure use the labels you see in the app.
+
+### 1. Open an empty library
+
+![From an empty library to the first reading, or skip into the workbench](docs/images/flow-start.svg)
+
+A new data directory has no sample paper. The main area says **Start from an empty library**, with three steps: **Import a paper**, **Connect a model**, and **Start reading**.
+
+You can do them in that order. Import a PDF with extractable text, or paste an arXiv link. Then add a model connection. Then choose **Skim** and start it. The guide closes and the paper workspace opens, with the job queued or running.
+
+**Skip the guide** opens the workbench immediately. Refresh the page and the guide stays skipped for this directory. Start PaperMaster again with another `--data-dir` and the guide is back. An existing library, with papers and notes already in it, opens straight into the workbench.
+
+### 2. Connect a model
+
+Open **Model connection** in the top bar.
+
+| Provider | What you need |
 | --- | --- |
-| Interactive reading | Step through the paper's architecture, vary formula inputs, and compare reported results or ablations. Open the original figures and tables where available. |
-| Repository reading | Follow a representative sample, inspect inputs and outputs, compare paper concepts with source lines, and try a prediction exercise where the evidence supports one. Teaching simulations are labeled. |
-| Follow-ups and main notes | Continue a question from its reading context, check the supporting evidence, and save selected excerpts to a Markdown note. |
-| Topic method tables | Review methods against a research topic, keep edits when adding papers, and confirm a snapshot for Markdown and Auto Research JSON export. See the [export format](docs/auto-research-export.md). |
+| Codex subscription | Codex CLI installed, then `codex login` |
+| OpenAI, Claude, or Gemini API | Model name, and an API key in the system credential store or an environment variable ending in `API_KEY` |
+| OpenAI-compatible endpoint | HTTPS base URL, or HTTP on localhost |
 
-**Coming soon in the reading launcher:** Guided reading, multi-paper comparison, and standalone questions. In-context follow-ups are available from a reading.
+Add two connections if you want a spare. Mark one **Default**. You can **Check** a connection before a long reading.
 
-## Models and local data
+A connection cannot be deleted while a job that uses it is queued or running. After the job finishes, **Delete** removes it. If it was the default, PaperMaster does not pick another one for you. The next reading waits until you choose a remaining connection. Older readings still show the model they used. **Resume with the selected connection** can continue a job on a different connection.
 
-PaperMaster supports Codex, OpenAI-compatible endpoints, and native OpenAI, Claude, and Gemini APIs. Configure API credentials through an environment variable or the Windows/macOS credential store.
+### 3. Choose how to read
 
-The library, reading history, and notes are stored locally. Generation sends relevant paper excerpts and, for repository reading, selected source excerpts to the configured provider. Figure and table crops are optional. Use the workspace's **备份** (Backup) action to export a copy of your library.
+![Skim, deep reading, and repository reading share one card](docs/images/flow-reading.svg)
+
+On the paper's **Read** tab, pick one mode. They do not have to be done in order.
+
+| Mode | Use it when |
+| --- | --- |
+| **Skim** | You want the paper in one pass |
+| **Deep reading** | You want the method, formulas, and experiments, with interactive cards |
+| **Repository reading** | The paper has a public GitHub repository, and you want the implementation at one commit |
+
+Turn on interactive figures for a deep reading when you want architecture, formula, and experiment cards in the chapter. For repository reading, paste the repository URL. The commit is stored with that reading record.
+
+**Guided reading**, **multi-paper comparison**, and **standalone questions** are not in the launcher yet. **Ask about this** from a finished chapter is available.
+
+### 4. Use the cards
+
+Architecture, formula, experiment, and repository steps use the same card: **title**, **actions**, **result**, **evidence**, and **save**. Architecture diagrams and formula demos use the darker engineering card, the same family as the repository walkthrough. Experiment tables stay on the lighter paper card.
+
+In a finished deep reading:
+
+1. On a formula card, change an input. The computed result updates. Open the evidence if the paper figure was captured. **Record this trial** writes the inputs and outputs into the main note.
+2. On an architecture card, use **Next step** and **Previous step**. **Ask about this step** starts a follow-up with that step's title.
+3. On an experiment card, filter by dataset, select two rows, and read the difference. Open the source figure or table.
+4. On repository steps, move through the sample. **Formula and code** puts the paper statement next to the pinned source. Evidence for a practice step appears after you answer it.
+
+The same cards work in a narrow window. Inputs stack, and buttons stay large enough to tap.
+
+### 5. Keep a passage
+
+![Select, highlight, annotate, then confirm the note](docs/images/flow-keep.svg)
+
+In the chapter body, select a sentence. The toolbar offers yellow, green, blue, and pink, plus **Write a note**.
+
+- Choose a color and keep reading. The highlight is stored on this reading record. Refresh, reopen the same record, and the color is on the same sentence. Another reading of the same paper does not show it.
+- **Write a note** opens a side panel on a wide screen and a bottom sheet on a phone. You can see the excerpt while you write. **Save note** keeps it on the highlight. The main note does not change yet.
+- **Add to the main note** copies the note, the excerpt, and a link back to the chapter. Open that link later and you return to the paper, the reading, and the highlight.
+- **Delete note** removes the annotation and leaves the color. **Delete highlight** removes the color and the annotation together. Text already added to the main note stays.
+
+### 6. Ask a follow-up
+
+From a chapter, choose **Ask about this**. Ask a question, then a second one in the same thread. **Collapse** hides the thread. Open it again and both turns are still there. After a refresh, the thread is in the follow-up list until you delete it.
+
+**Save to the main note** keeps the excerpt you select. **Delete this follow-up** removes the thread from the reading. The saved excerpt remains in the note.
+
+### 7. Set the two languages
+
+**Language settings** in the top bar has two controls.
+
+**Interface language** changes the workspace: navigation, import, reading setup, cards, highlights, notes, model connections, follow-ups, and the method table. **Generation language** changes the language of a new deep reading, a new follow-up, and a new method candidate. Leave it on **Follow the interface** unless you want them to differ. An English interface can still generate a Chinese reading.
+
+Switching the interface does not rewrite the paper, a finished reading, a saved follow-up, a method row, or a handwritten note.
+
+### 8. Build a method table
+
+![Candidates, a shared mechanism, and one confirmed snapshot](docs/images/flow-method.svg)
+
+Open **Method tables**. Create a topic, for example `bounded search`, and optionally say which problem the table is for. Select up to twelve paper versions that already have a reading. **Generate candidates**.
+
+A candidate shows the structural problem, the mechanism, the conditions, the concrete practice, and a source you can check. An experiment record includes the metric, the comparison, the data or conditions, the result, and the source. Outcomes can be effective, no clear improvement, or failure. If the paper explains a mechanism and does not test the effect, the row is marked **The paper does not check the effect**. A paper that only shares keywords is left out. If nothing qualifies, the preview can be empty.
+
+**Apply** saves each practice as its own row. Rows that share a mechanism after the wording is normalized sit side by side, one column per paper. Older rows that have only the original fields remain under **Not yet distilled into a meta-method**.
+
+Select rows, **Preview delivery**, then confirm. **Note export** and **Auto Research export** are the same snapshot. Edit the table afterwards and download the snapshot again: it is unchanged. The snapshot does not decide a target task, predict a result, or design the experiment. See the [export format](docs/auto-research-export.md).
+
+### 9. Back up
+
+**Backup** in the top bar downloads a copy of the library. Papers, readings, notes, highlights, and method tables are files in the data directory:
+
+| System | Default directory |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\PaperMaster` |
+| macOS | `~/Library/Application Support/PaperMaster` |
+| Linux | `$XDG_DATA_HOME/papermaster` or `~/.local/share/papermaster` |
+
+Generation sends the relevant paper excerpts, and for repository reading the selected source excerpts, to the provider you chose. Sending figure crops is optional on the reading form.
 
 ## Develop from source
 
@@ -57,5 +145,7 @@ npm test
 npm run build
 npm start
 ```
+
+`npm start` serves the built `dist/` interface. Run `npm run build` again after changing `src/`.
 
 [Interactive reading design](docs/interactive-reading-design.md) · [Platform design](docs/platform-design.md) · [Report an issue](https://github.com/Kstheme/PaperMaster/issues)
