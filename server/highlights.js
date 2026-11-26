@@ -47,6 +47,12 @@ export function highlightService(library) {
     return library.put('highlights', next);
   }
 
+  function remove(job, highlightId) {
+    owned(job, highlightId);
+    library.remove('highlights', highlightId);
+    return { id: highlightId };
+  }
+
   function annotationPassage(job, highlightId) {
     const current = owned(job, highlightId);
     const paperId = job.references?.[0]?.id;
@@ -70,7 +76,7 @@ export function highlightService(library) {
     return current;
   }
 
-  return { list, create, saveAnnotation, annotationPassage };
+  return { list, create, saveAnnotation, remove, annotationPassage };
 }
 
 function passage(value, label, max) {

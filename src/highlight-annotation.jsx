@@ -16,7 +16,7 @@ function usePlacement() {
   return phone ? 'sheet' : 'sidebar';
 }
 
-export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onClose, onNote }) {
+export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onClose, onNote, onDeleteHighlight }) {
   const { t } = useLocale();
   const placement = usePlacement();
   const [text, setText] = useState(highlight.annotation?.text ?? '');
@@ -68,6 +68,29 @@ export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onC
     onClose();
   }
 
+  async function removeAnnotation() {
+    if (busy) return;
+    if (!textRef.current.trim() && !saved.current) return;
+    if (!confirm(t('deleteAnnotationConfirm'))) return;
+    setBusy(true);
+    setError('');
+    try {
+      const updated = await api('jobs/' + jobId + '/highlights/' + highlight.id, {
+        method: 'PATCH', json: { annotation: '' },
+      });
+      saved.current = '';
+      textRef.current = '';
+      setText('');
+      onChange(updated);
+      setStatus(t('annotationCleared'));
+      onClose();
+    } catch (failure) {
+      setError(failure.message || t('annotationSaveFailed'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirm(event) {
     event.preventDefault();
     setBusy(true);
@@ -107,6 +130,8 @@ export function HighlightAnnotation({ jobId, highlight, canAppend, onChange, onC
             placeholder={t('annotationPlaceholder')} onChange={event => { setText(event.target.value); setStatus(''); setError(''); }}/>
         </label>
         <div className="actions">
+          <button type="button" disabled={busy} onClick={() => onDeleteHighlight(highlight)}>{t('deleteHighlight')}</button>
+          <button type="button" disabled={busy || (!text.trim() && !highlight.annotation?.text)} onClick={removeAnnotation}>{t('deleteAnnotation')}</button>
           <button type="button" disabled={busy} onClick={() => save(text).catch(failure => setError(failure.message || t('annotationSaveFailed')))}>{t('saveAnnotation')}</button>
           {canAppend && <button className="primary" disabled={busy || !text.trim()}>{t('confirmAddNote')}</button>}
         </div>

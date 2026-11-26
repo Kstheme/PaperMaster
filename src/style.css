@@ -325,6 +325,7 @@ mark.reading-highlight[data-color="rose"] { background: #f8d5dc; }
 .feedback { margin: 6px 0 12px; border-left: 2px solid var(--green); padding: 8px 12px; background: var(--tint); }
 .exercise form { display: grid; gap: 8px; }
 .visual, .chapter-demo { border: 1px solid var(--line); border-radius: 7px; margin: 21px 0; background: var(--inset); min-width: 0; }
+.chapter-demo:has(.engineering-card) { border: 0; border-radius: 0; background: transparent; }
 .visual-loading { min-height: 265px; padding: 14px; }
 .chapter-demo .visual { border: 0; border-radius: 0; margin: 0; }
 .demo-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 13px; border-bottom: 1px solid var(--line); }

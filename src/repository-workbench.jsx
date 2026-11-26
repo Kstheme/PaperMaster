@@ -49,7 +49,7 @@ export function RepositoryWorkbench({ guide, repo, onTool, initialStep }) {
   const followup = onTool && <button type="button" onClick={() => onTool([followTarget.title, followTarget.operation].filter(Boolean).join('\n'),
     { repoId: repo?.id, file: followCode?.file, repositoryStep: followTarget.id })}>{t('askStep')}</button>;
   return <Tabs.Root value={view} onValueChange={setView}>
-    <ReadingCard className="repository-workbench" label={guide.title} kicker={t('repoSteps')} title={guide.title}
+    <ReadingCard className="repository-workbench engineering-card" label={guide.title} kicker={t('repoSteps')} title={guide.title}
       intro={<div className="repository-card-intro">
         {guide.intro && <p>{guide.intro}</p>}
         {repo && <a className="repository-commit" href={repo.url + '/tree/' + repo.commit} target="_blank" rel="noreferrer"

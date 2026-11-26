@@ -254,6 +254,10 @@ async function route(req, res, url, { library, reader, models, followups, highli
         const input = await body(req);
         return json(res, await serialized(() => highlights.saveAnnotation(job, member, input)));
       }
+      if (action === 'highlights' && member && !parts[4] && method === 'DELETE') {
+        if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+        return json(res, highlights.remove(job, member));
+      }
       if (action === 'highlights' && member && parts[4] === 'note' && !parts[5] && method === 'POST') {
         if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
         await body(req);

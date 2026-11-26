@@ -4,7 +4,8 @@ import { init, use } from 'echarts/core';
 import { BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { FlaskConical } from 'lucide-react';
+import { ReadingCard } from './reading-card.jsx';
+import { useLocale } from './locale.jsx';
 
 use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
@@ -16,6 +17,7 @@ function softmax(values) {
 }
 
 export default function Softmax() {
+  const { t, language } = useLocale();
   const [value, setValue] = useState(2);
   const host = useRef(null);
   const chart = useRef(null);
@@ -39,21 +41,19 @@ export default function Softmax() {
       xAxis: { type: 'value', min: 0, max: 1, interval: .25,
         splitLine: { lineStyle: { color: color('--line'), type: 'dashed' } },
         axisLabel: { color: color('--muted'), formatter: item => (item * 100) + '%' } },
-      yAxis: { type: 'category', inverse: true, data: ['候选 A', '候选 B', '候选 C'], axisLabel: { color: color('--muted') } },
-      series: [{ name: '当前权重', type: 'bar', barMaxWidth: 14,
+      yAxis: { type: 'category', inverse: true, data: ['A', 'B', 'C'].map(letter => t('softmaxCandidate', { letter })), axisLabel: { color: color('--muted') } },
+      series: [{ name: t('softmaxWeight'), type: 'bar', barMaxWidth: 14,
         data: weight.map((item, index) => ({ value: item, itemStyle: { color: color(index === 0 ? '--accent' : '--chart-3'), borderRadius: [0, 3, 3, 0] } })),
         label: { show: true, position: 'right', color: color('--text'), formatter: ({ value }) => value.toFixed(3) } }],
     });
-  }, [value]);
-  return <section className="visual">
-    <div className="visual-title"><FlaskConical size={17}/><h3>Softmax 演算</h3><span>教学示例</span></div>
-    <div className="sample">
-      <div className="slider-label"><label id="softmax-score">候选 A 得分</label><output>{value.toFixed(1)}</output></div>
+  }, [value, language]);
+  return <ReadingCard className="softmax-lab engineering-card" label={t('formulaCard')} kicker={t('teachingDemo')} title={t('softmaxTitle')}
+    actions={<div className="sample">
+      <div className="slider-label"><label id="softmax-score">{t('softmaxScore')}</label><output>{value.toFixed(1)}</output></div>
       <Slider.Root className="slider" min={-1} max={4} step={.1} value={[value]} onValueChange={([next]) => setValue(next)}>
         <Slider.Track className="track"><Slider.Range className="range"/></Slider.Track>
         <Slider.Thumb className="thumb" aria-labelledby="softmax-score"/>
       </Slider.Root>
-      <div className="chart" ref={host} role="img" aria-label={'A、B、C 权重分别是 ' + weight.map(item => item.toFixed(3)).join('、')}/>
-    </div>
-  </section>;
+      <div className="chart" ref={host} role="img" aria-label={t('softmaxWeights', { weights: weight.map(item => item.toFixed(3)).join(t('softmaxJoin')) })}/>
+    </div>}/>;
 }

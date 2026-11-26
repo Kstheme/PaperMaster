@@ -20,10 +20,9 @@ export function ReadingFigure({ name, job, repo, onRetry, busy, onNote, onTool }
   return <div className="chapter-figure">
     {!data ? <ComponentState name={name} record={record} job={job} onRetry={onRetry} canRetry={!busy && !working(job)}/>
       : name.startsWith('graph') ? <AnimatedGraph graph={data} name={figureName} repo={repo} onTool={onTool} evidence={source}/>
-        : name.startsWith('formula') ? <FormulaLab demo={data} jobId={job.id} component={name} onNote={onNote} evidence={source}/>
+        : name.startsWith('formula') ? <FormulaLab demo={data} jobId={job.id} component={name} onNote={onNote} evidence={source} onAsk={onTool && ask}/>
           : <ExperimentTable table={data} name={figureName} evidence={source} onAsk={onTool && ask}/>}
     {record?.source && !data && <SourcePreview source={record.source} jobId={job.id}/>}
-    {data && onTool && name.startsWith('formula') && <button className="figure-question" onClick={ask}>{t('askFigure')}</button>}
   </div>;
 }
 
@@ -85,7 +84,7 @@ function AnimatedGraph({ graph, name, repo, onTool, repository = false, evidence
     current.code.file.split('/').map(encodeURIComponent).join('/') + (current.code.line ? '#L' + current.code.line : '')} target="_blank" rel="noreferrer">
     {current.code.file}{current.code.symbol && ' · ' + current.code.symbol}</a>
     : <p className="muted">{t('repoUnconfirmed')}</p>);
-  return <ReadingCard className="inline-flow" label={t('architectureCard')} kicker={graph.title ? name : t('architectureCard')} title={graph.title || name}
+  return <ReadingCard className="inline-flow engineering-card" label={t('architectureCard')} kicker={graph.title ? name : t('architectureCard')} title={graph.title || name}
     intro={graph.intro && <Markdown>{graph.intro}</Markdown>}
     actions={<>
       <div className="reading-card-toolbar flow-controls">

@@ -1121,6 +1121,13 @@ test('a highlight annotation stays on its highlight until the reader confirms it
   assert.ok(kept.markdown.includes(revised));
   assert.equal(kept.markdown.includes(unconfirmed), false);
   assert.equal((await request('jobs/' + jobA + '/highlights')).some(item => item.id === cleared.id && !Object.hasOwn(item, 'annotation')), true);
+  await request('jobs/' + jobB + '/highlights/' + cleared.id, { method: 'DELETE', status: 404 });
+  const removed = await request('jobs/' + jobA + '/highlights/' + cleared.id, { method: 'DELETE' });
+  assert.equal(removed.id, cleared.id);
+  assert.equal((await request('jobs/' + jobA + '/highlights')).some(item => item.id === cleared.id), false);
+  const noteAfterDelete = await request('papers/' + paperId + '/note');
+  assert.ok(noteAfterDelete.markdown.includes(revised));
+  assert.ok(noteAfterDelete.markdown.includes(href));
 });
 
 test('a fresh data directory has no preset papers and an existing library still opens', async t => {

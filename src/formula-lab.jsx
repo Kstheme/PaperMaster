@@ -10,7 +10,7 @@ const number = value => Array.isArray(value) ? '[' + value.map(number).join(', '
 const initial = demo => Object.fromEntries(demo.inputs.map(item => [item.id, item.value]));
 const palette = Array.from({ length: 6 }, (_, i) => 'var(--chart-' + (i + 1) + ')');
 
-export function FormulaLab({ demo, jobId, component, onNote, evidence }) {
+export function FormulaLab({ demo, jobId, component, onNote, evidence, onAsk }) {
   const { t } = useLocale();
   const [values, setValues] = useState(() => initial(demo));
   const [observe, setObserve] = useState(false);
@@ -37,7 +37,7 @@ export function FormulaLab({ demo, jobId, component, onNote, evidence }) {
       onNote();
     } catch (error) { setSave({ error: error.message }); }
   }
-  return <ReadingCard className="formula-lab" label={t('formulaCard')} kicker={t('teachingDemo')} title={demo.title}
+  return <ReadingCard className="formula-lab engineering-card" label={t('formulaCard')} kicker={t('teachingDemo')} title={demo.title}
     intro={<><Markdown>{demo.objective}</Markdown><p className="prediction">{demo.prediction}</p></>}
     actions={<>
       <div className="lab-scenarios">
@@ -85,6 +85,7 @@ export function FormulaLab({ demo, jobId, component, onNote, evidence }) {
     save={<>
       <div className="actions lab-note">
         <button type="button" disabled={!result || save.busy} onClick={() => { setObserve(value => !value); setSave({}); }}><Archive size={15}/>{t('recordTrial')}</button>
+        {onAsk && <button type="button" onClick={onAsk}>{t('askFigure')}</button>}
         {save.message && <p role="status">{save.message}</p>}
       </div>
       {observe && <form className="settings-form" onSubmit={submit}>

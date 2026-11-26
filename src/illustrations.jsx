@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, FlaskConical } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { Markdown } from './markdown.jsx';
+import { ReadingCard } from './reading-card.jsx';
+import { useLocale } from './locale.jsx';
 
 export function Sample({ steps }) {
+  const { t } = useLocale();
   const [position, setPosition] = useState(0);
   const step = steps[position] ?? steps[0];
   if (!step) return null;
-  return <section className="visual">
-    <div className="visual-title"><FlaskConical size={17}/><h3>教学样本追踪</h3><span>{position + 1} / {steps.length}</span></div>
-    <div className="sample">
-      <h4>{step.title}</h4>
-      <div className="sample-columns">{[['输入', step.input], ['操作', step.operation], ['输出', step.output]].map(([label, text]) =>
-        <div key={label}><strong>{label}</strong><Markdown>{text}</Markdown></div>)}</div>
+  return <ReadingCard className="sample-trace engineering-card" label={t('sampleTrace')} kicker={t('teachingDemo')} title={step.title}
+    actions={<div className="reading-card-toolbar">
       <div className="actions">
-        <button disabled={position === 0} onClick={() => setPosition(position - 1)}><ArrowLeft size={14}/>上一步</button>
-        <button disabled={position === steps.length - 1} onClick={() => setPosition(position + 1)}>下一步<ArrowRight size={14}/></button>
+        <button type="button" disabled={position === 0} onClick={() => setPosition(position - 1)}><ArrowLeft size={14}/>{t('previousStep')}</button>
+        <button type="button" disabled={position === steps.length - 1} onClick={() => setPosition(position + 1)}>{t('nextStep')}<ArrowRight size={14}/></button>
       </div>
-    </div>
-  </section>;
+      <span className="muted">{position + 1} / {steps.length}</span>
+    </div>}
+    result={<dl className="repository-fields">{[[t('inputLabel'), step.input], [t('operationLabel'), step.operation], [t('outputLabel'), step.output]].map(([label, text]) =>
+      <div key={label}><dt>{label}</dt><dd><Markdown>{text}</Markdown></dd></div>)}</dl>}/>;
 }

@@ -118,7 +118,7 @@
 @media (max-width: 570px) {
   .lab-input input[type="range"] { min-height: 44px; }
 }
-.repository-workbench {
+.reading-card.engineering-card {
   color-scheme: dark;
   --background: var(--studio-background);
   --surface: var(--studio-surface);
@@ -136,9 +136,9 @@
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: 0 12px 28px #2428221c;
-  container-type: inline-size;
   line-height: 1.65;
 }
+.repository-workbench { container-type: inline-size; }
 .repository-card-intro {
   display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px;
 }

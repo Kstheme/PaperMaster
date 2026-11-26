@@ -149,6 +149,24 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
     setHighlights(items => items.map(item => item.id === saved.id ? saved : item));
   }
 
+  async function deleteHighlight(item) {
+    if (!item || saving.current) return;
+    if (!confirm(t('deleteHighlightConfirm'))) return;
+    saving.current = true;
+    setHighlightError('');
+    try {
+      await api('jobs/' + id + '/highlights/' + item.id, { method: 'DELETE' });
+      setHighlights(items => items.filter(entry => entry.id !== item.id));
+      setAnnotationId(current => current === item.id ? null : current);
+      setToolbar(null);
+      window.getSelection()?.removeAllRanges();
+    } catch (error) {
+      setHighlightError(error.message || t('highlightSaveFailed'));
+    } finally {
+      saving.current = false;
+    }
+  }
+
   function openHighlight(item) {
     if (!item || item.section !== active.key) return;
     setToolbar(null);
@@ -198,6 +216,8 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
   }
 
   const annotation = highlights.find(item => item.id === annotationId && item.section === active.key) || null;
+  const toolbarHighlight = toolbar && highlights.find(item => item.section === active.key && item.start === toolbar.anchor.start
+    && item.end === toolbar.anchor.end && item.quote === toolbar.anchor.quote);
   return <Tabs.Root className={['reader', figures ? 'reader-inline' : '', annotation ? 'reader-with-annotation' : ''].filter(Boolean).join(' ')} value={active.key} onValueChange={select} orientation="vertical" activationMode="manual">
     {sections.length > 1 && <nav className="reader-index" aria-label={t('readerIndex')}>
       <h3>{t('readerIndex')}</h3>
@@ -224,6 +244,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
           {readingHighlightColors.map(color => <button key={color.id} type="button" data-color={color.id} aria-label={highlightColorLabel[color.id]} title={highlightColorLabel[color.id]}
             onClick={() => chooseColor(color.id)}/>)}
           <button type="button" className="reading-highlight-write" onClick={startAnnotation}>{t('writeAnnotation')}</button>
+          {toolbarHighlight && <button type="button" className="reading-highlight-write" onClick={() => deleteHighlight(toolbarHighlight)}>{t('deleteHighlight')}</button>}
         </div>}
         {active.searched && <aside className="repo-reading-evidence">
           <h3>{t('chapterEvidence')}</h3>
@@ -237,7 +258,7 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
       </article>
     </Tabs.Content>
     {annotation && <HighlightAnnotation key={annotation.id} jobId={id} highlight={annotation} canAppend={canAppendNote}
-      onChange={rememberHighlight} onClose={() => setAnnotationId(null)} onNote={onNote}/>}
+      onChange={rememberHighlight} onClose={() => setAnnotationId(null)} onNote={onNote} onDeleteHighlight={deleteHighlight}/>}
   </Tabs.Root>;
 }
 
