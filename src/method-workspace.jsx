@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api, download } from './api.js';
+import { groupMethodRecords } from './method-groups.js';
 import { ConnectionPicker, EvidenceLinks, paperMatches, useAction } from './workbench-fields.jsx';
 import { evidenceHref, paperLocation } from '../server/evidence.js';
 
@@ -126,6 +127,35 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       download(file, table.title + '-' + snapshot.id.slice(0, 8) + (format === 'markdown' ? '.md' : '.json'));
     });
   }
+  function toggleIncluded(row, checked) {
+    setPreview(null);
+    setIncluded(current => {
+      const next = { ...current };
+      if (checked) next[row.id] = false;
+      else delete next[row.id];
+      return next;
+    });
+  }
+  function toggleIdea(row, checked) {
+    setPreview(null);
+    setIncluded({ ...included, [row.id]: checked });
+  }
+  function removeRow(row) {
+    if (!confirm('从方法表删除「' + row.fields.name.text + '」？已确认的交付快照会保留。')) return;
+    run(async () => {
+      updateTable(await api(root + '/rows/' + row.id, { method: 'DELETE', json: { revision: table.revision } }));
+      setIncluded(current => { const next = { ...current }; delete next[row.id]; return next; });
+      setDraft(null);
+      setMessage('已从当前方法表删除该方法。');
+    });
+  }
+  function submitRow(row, data) {
+    return run(async () => {
+      updateTable(await api(root + '/rows/' + row.id, { method: 'PATCH', json: { ...data, revision: table.revision } }));
+      setMessage('已保存方法行。');
+      return true;
+    });
+  }
 
   return <>
     <section className="panel">
@@ -169,48 +199,11 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
         <button disabled={busy || Object.keys(included).length === 0} onClick={previewDelivery}>预览交付</button>
       </div>
       {!table.rows.length && <p className="muted">确认候选后，方法会出现在这里。</p>}
-      {!!table.rows.length && <div className="method-matrix" role="region" tabIndex={0} aria-label="方法对照表">
-        <table>
-          <thead><tr><th scope="col">交付</th><th scope="col">论文版本</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
-            <th scope="col">迁移设想</th><th scope="col">编辑</th></tr></thead>
-          <tbody>{table.rows.map(row => <React.Fragment key={row.id}>
-          <tr>
-            <td><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)} onChange={event => {
-              setPreview(null);
-              const checked = event.target.checked;
-              setIncluded(current => {
-                const next = { ...current };
-                if (checked) next[row.id] = false;
-                else delete next[row.id];
-                return next;
-              });
-            }}/></td>
-            <td><a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
-              {row.relatedId && <p className="muted">有可对照的旧版本</p>}</td>
-            {fields.map(([key]) => <td key={key}><FieldValue field={row.fields[key]}/></td>)}
-            <td>{row.idea && <><p>{row.idea}</p>{Object.hasOwn(included, row.id) && <label className="check">
-              <input type="checkbox" checked={included[row.id]} onChange={event => {
-                setPreview(null);
-                setIncluded({ ...included, [row.id]: event.target.checked });
-              }}/>一并交付</label>}</>}</td>
-            <td><RowEditor row={row} disabled={busy} onRemove={() => {
-              if (!confirm('从方法表删除「' + row.fields.name.text + '」？已确认的交付快照会保留。')) return;
-              run(async () => {
-                updateTable(await api(root + '/rows/' + row.id, { method: 'DELETE', json: { revision: table.revision } }));
-                setIncluded(current => { const next = { ...current }; delete next[row.id]; return next; });
-                setDraft(null);
-                setMessage('已从当前方法表删除该方法。');
-              });
-            }} onSubmit={data => run(async () => {
-              updateTable(await api(root + '/rows/' + row.id, { method: 'PATCH', json: { ...data, revision: table.revision } }));
-              setMessage('已保存方法行。');
-              return true;
-            })}/></td>
-          </tr>
-          {row.metaMethod && <tr><td colSpan={8}><MethodEvidence row={row}/></td></tr>}
-          </React.Fragment>)}</tbody>
-        </table>
-      </div>}
+      {groupMethodRecords(table.rows).map((group, index) => group.kind === 'meta'
+        ? <MetaMethodGroup key={group.key} group={group} headingId={'method-group-' + index} included={included} busy={busy}
+          onToggleIncluded={toggleIncluded} onToggleIdea={toggleIdea} onRemove={removeRow} onSubmit={submitRow}/>
+        : <LegacyMethodTable key="legacy" rows={group.rows} included={included} busy={busy}
+          onToggleIncluded={toggleIncluded} onToggleIdea={toggleIdea} onRemove={removeRow} onSubmit={submitRow}/>)}
       {message && <p role="status" className="message">{message}</p>}
     </section>
 
@@ -238,6 +231,90 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       </div>)}
     </section>}
   </>;
+}
+
+function MetaMethodGroup({ group, headingId, included, busy, onToggleIncluded, onToggleIdea, onRemove, onSubmit }) {
+  return <section className="meta-method-group" aria-labelledby={headingId}>
+    <h3 id={headingId}>元方法</h3>
+    <dl className="meta-method-summary">
+      <div><dt>结构性问题</dt><dd>{group.structuralProblem}</dd></div>
+      <div><dt>作用机制</dt><dd>{group.mechanism}</dd></div>
+    </dl>
+    <div className="method-compare" role="region" tabIndex={0} aria-label={'元方法对照 · ' + group.mechanism}>
+      <table>
+        <thead><tr>
+          <th scope="col">对照</th>
+          {group.rows.map(row => <th key={row.id} scope="col">{row.fields.name.text}</th>)}
+        </tr></thead>
+        <tbody>
+          <tr>
+            <th scope="row">具体做法</th>
+            {group.rows.map(row => <td key={row.id}>{row.practice ? <FieldValue field={row.practice}/> : <p className="muted">未记录</p>}</td>)}
+          </tr>
+          <tr>
+            <th scope="row">适用前提</th>
+            {group.rows.map(row => <td key={row.id}>{row.metaMethod.conditions ? <FieldValue field={row.metaMethod.conditions}/> : <p className="muted">未记录</p>}</td>)}
+          </tr>
+          <tr>
+            <th scope="row">结果</th>
+            {group.rows.map(row => <td key={row.id}><ResultCell row={row}/></td>)}
+          </tr>
+          <tr>
+            <th scope="row">出处</th>
+            {group.rows.map(row => <td key={row.id}>
+              <a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
+              {row.relatedId && <p className="muted">有可对照的旧版本</p>}
+            </td>)}
+          </tr>
+          <tr>
+            <th scope="row">迁移设想</th>
+            {group.rows.map(row => <td key={row.id}>{row.idea && <><p>{row.idea}</p>{Object.hasOwn(included, row.id) && <label className="check">
+              <input type="checkbox" checked={included[row.id]} onChange={event => onToggleIdea(row, event.target.checked)}/>一并交付</label>}</>}</td>)}
+          </tr>
+          <tr>
+            <th scope="row">交付</th>
+            {group.rows.map(row => <td key={row.id}>
+              <label className="check"><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)}
+                onChange={event => onToggleIncluded(row, event.target.checked)}/>选入交付</label>
+              <RowEditor row={row} disabled={busy} onRemove={() => onRemove(row)} onSubmit={data => onSubmit(row, data)}/>
+            </td>)}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>;
+}
+
+function ResultCell({ row }) {
+  if (row.experiment) return <>
+    <p className="method-outcome" data-outcome={row.experiment.outcome}>{outcomes[row.experiment.outcome] || row.experiment.outcome}</p>
+    <ExperimentReview experiment={row.experiment}/>
+  </>;
+  if (row.effectCheck) return <p className="method-unverified">{row.effectCheck}</p>;
+  return <p className="muted">未记录结果</p>;
+}
+
+function LegacyMethodTable({ rows, included, busy, onToggleIncluded, onToggleIdea, onRemove, onSubmit }) {
+  return <section className="meta-method-group" aria-label="尚未提炼元方法">
+    <h3>尚未提炼元方法</h3>
+    <p className="muted">这些记录只有原有字段，仍可查看、编辑和交付。</p>
+    <div className="method-matrix" role="region" tabIndex={0} aria-label="尚未提炼元方法">
+      <table>
+        <thead><tr><th scope="col">交付</th><th scope="col">论文版本</th>{fields.map(([key, label]) => <th key={key} scope="col">{label}</th>)}
+          <th scope="col">迁移设想</th><th scope="col">编辑</th></tr></thead>
+        <tbody>{rows.map(row => <tr key={row.id}>
+          <td><input type="checkbox" aria-label={'交付 ' + row.fields.name.text} checked={Object.hasOwn(included, row.id)}
+            onChange={event => onToggleIncluded(row, event.target.checked)}/></td>
+          <td><a href={evidenceHref(paperLocation(row.paper))} target="_blank" rel="noreferrer">{identify(row.paper)}</a>
+            {row.relatedId && <p className="muted">有可对照的旧版本</p>}</td>
+          {fields.map(([key]) => <td key={key}><FieldValue field={row.fields[key]}/></td>)}
+          <td>{row.idea && <><p>{row.idea}</p>{Object.hasOwn(included, row.id) && <label className="check">
+            <input type="checkbox" checked={included[row.id]} onChange={event => onToggleIdea(row, event.target.checked)}/>一并交付</label>}</>}</td>
+          <td><RowEditor row={row} disabled={busy} onRemove={() => onRemove(row)} onSubmit={data => onSubmit(row, data)}/></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </section>;
 }
 
 function MethodEvidence({ row }) {
