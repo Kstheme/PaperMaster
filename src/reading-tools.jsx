@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { Markdown } from './markdown.jsx';
-import { ConnectionPicker, EffortField, EffortInfo, EvidenceLinks, useAction, useCodexCatalog } from './workbench-fields.jsx';
+import { ConnectionPicker, EffortField, EffortInfo, EvidenceLinks, useAction, useCodexCatalog, useConnectionChoice } from './workbench-fields.jsx';
 
 export function Followups({ job, library, intent, initialThread, onNote, onError }) {
   const [threads, setThreads] = useState([]);
   const [threadId, selectThread] = useState(initialThread || '');
   const [question, setQuestion] = useState('');
-  const [connection, setConnection] = useState(job.connectionId);
+  const [connection, setConnection] = useConnectionChoice(library, job.connectionId);
   const [effort, setEffort] = useState('connection');
   const [draft, setDraft] = useState(null);
   const [message, setMessage] = useState('');

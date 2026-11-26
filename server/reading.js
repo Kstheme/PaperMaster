@@ -43,6 +43,10 @@ export const modes = {
 };
 
 const date = () => new Date().toISOString();
+
+export function connectionInUse(jobs, connectionId) {
+  return jobs.some(job => job.connectionId === connectionId && (job.status === 'queued' || job.status === 'running'));
+}
 const lessonModes = new Set(['deep', 'guided']);
 const illustratedModes = new Set(['skim', ...lessonModes]);
 const stepsFor = job => {
@@ -254,6 +258,7 @@ export function createReadingService(library, models) {
     try {
       job = update(job, { status: 'running' });
       const saved = library.get('connections', job.connectionId);
+      if (!saved) throw new AppError('原来的模型连接已删除。请改用现存连接续跑。', 409, 'connection_missing');
       const connection = { ...saved, ...(saved.provider === 'codex' && job.codexModel !== undefined && { model: job.codexModel }), effort: job.effort };
       const texts = await Promise.all(job.references.map(ref => loadPaper(library, ref.id, ref.versionId)));
       const signal = run.controller.signal;

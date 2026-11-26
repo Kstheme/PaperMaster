@@ -46,7 +46,8 @@ export function Reader({ id, sections, onAppend, busy, figures, renderFigure, on
     <Tabs.Content key={active.key} value={active.key} className="reader-content" asChild>
       <article ref={article}>
         <div className="chapter-header">
-          <div><h2 ref={heading} tabIndex={-1}>{active.title}</h2><EffortInfo entry={active}/></div>
+          <div><h2 ref={heading} tabIndex={-1}>{active.title}</h2><EffortInfo entry={active}/>
+            {active.model && <p className="muted">模型 · {active.model}</p>}</div>
           <div className="actions">
             {onTool && <button onMouseDown={event => event.preventDefault()} onClick={() => openTool()}>就此追问</button>}
             {onAppend && <button disabled={busy} onClick={() => onAppend(active.key)}><BookmarkPlus size={15}/>加入笔记</button>}

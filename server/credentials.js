@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { AppError } from './errors.js';
@@ -64,6 +64,14 @@ export function credentialVault(directory = join(defaultDataDirectory(), 'creden
         }
       } catch { /* Credential may belong to an installation that was migrated. */ }
       return undefined;
+    },
+    async delete(id) {
+      try {
+        if (process.platform === 'win32') await rm(join(directory, id), { force: true });
+        else if (process.platform === 'darwin') {
+          await subprocess('/usr/bin/security', ['delete-generic-password', '-a', userInfo().username, '-s', 'PaperMaster.' + id]);
+        }
+      } catch { /* Credential may already be gone. */ }
     },
   };
 }

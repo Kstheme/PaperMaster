@@ -74,6 +74,17 @@ export function modelServices(library, vault, remoteFetch = fetch, codex = { gen
     return connection;
   }
 
+  async function remove(id) {
+    const connection = library.get('connections', id);
+    if (!connection) throw new AppError('请求的记录不存在。', 404);
+    library.remove('connections', id);
+    if (library.get('settings', 'default')?.connectionId === id) library.remove('settings', 'default');
+    if (connection.credential === 'vault') {
+      try { await vault.delete?.(id); } catch { /* The connection row is already gone. */ }
+    }
+    return { id };
+  }
+
   async function generate(connection, prompt, { signal, onDelta, maxTokens = 3000, images = [], effort = connection.effort } = {}) {
     const timeout = AbortSignal.timeout(240_000);
     signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -125,7 +136,7 @@ export function modelServices(library, vault, remoteFetch = fetch, codex = { gen
   }
 
   return {
-    save, generate, resolveEffort, listCodexModels,
+    save, remove, generate, resolveEffort, listCodexModels,
     async check(connection, signal) {
       if (connection.provider === 'codex') return codex.status(AbortSignal.timeout(25_000));
       const result = await generate(connection, 'Reply with exactly: OK', { signal, maxTokens: 256 });

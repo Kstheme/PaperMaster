@@ -8,7 +8,7 @@ import { Reader } from './reader.jsx';
 import { ReadingFigure, ReadingSources } from './interaction-reader.jsx';
 import { Followups } from './reading-tools.jsx';
 import { MethodWorkspace } from './method-workspace.jsx';
-import { ConnectionPicker, EffortField, paperMatches, useAction, useCodexCatalog } from './workbench-fields.jsx';
+import { ConnectionPicker, EffortField, paperMatches, useAction, useCodexCatalog, useConnectionChoice } from './workbench-fields.jsx';
 import { MotionTabsList, positionHighlight } from './interface-motion.jsx';
 import { FirstReading, firstReadingSkipped, rememberFirstReading } from './first-reading.jsx';
 import { figureChapter, figureKeys } from '../server/reading-figures.js';
@@ -161,6 +161,8 @@ function Connections({ library, onSaved, onUpdated, onError }) {
     <section className="panel">
       <h2>已添加的连接</h2>
       {library.connections.length === 0 && <p className="muted">添加一个连接后即可生成阅读内容。</p>}
+      {library.connections.length > 0 && !library.defaultConnection &&
+        <p className="muted">当前没有默认连接。下次生成前，请从现存连接里选择。</p>}
       <ul className="connection-list">{library.connections.map(connection => <li key={connection.id}>
         <div><strong>{connection.label}</strong> <small>{connection.id === library.defaultConnection ? '默认' : ''}</small><p className="muted">{connection.model || '本机配置模型'}</p></div>
         <div className="actions">
@@ -176,6 +178,15 @@ function Connections({ library, onSaved, onUpdated, onError }) {
             await api('connections/default', { method: 'PUT', json: { connectionId: connection.id } });
             await onSaved(connection);
           })}>设为默认</button>
+          <button disabled={busy} onClick={() => {
+            if (!confirm(`删除连接「${connection.label}」？排队或正在运行的任务会继续，结束后才能删除。已有阅读和模型出处会保留。`)) return;
+            run(async () => {
+              const wasDefault = connection.id === library.defaultConnection;
+              await api(`connections/${connection.id}`, { method: 'DELETE' });
+              setProbe(wasDefault ? '已删除默认连接。下次生成前请重新选择一个现存连接。' : '已删除该连接。');
+              await onUpdated();
+            });
+          }}>删除</button>
         </div>
         {connection.provider === 'codex' && <CodexModelEditor key={connection.model} connection={connection}
           catalog={catalog} onSaved={onUpdated} onError={onError}/>}
@@ -400,7 +411,7 @@ function RepositoryPanel({ paperId, repoId, onError, panelId, onAsk, section }) 
 }
 
 function JobView({ job, paper, library, onJob, onError, onNote }) {
-  const [resumeConnection, setResumeConnection] = useState(job.connectionId);
+  const [resumeConnection, setResumeConnection] = useConnectionChoice(library, job.connectionId);
   const [resumeEffort, setResumeEffort] = useState(job.effort || 'connection');
   const [followupsOpen, setFollowupsOpen] = useState(incoming.get('job') === job.id && incoming.has('thread'));
   const [intent, setIntent] = useState(null);
@@ -492,7 +503,7 @@ function Exercise({ job, library, onError }) {
   const [attempt, setAttempt] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [answer, setAnswer] = useState('');
-  const [connection, setConnection] = useState(job.connectionId);
+  const [connection, setConnection] = useConnectionChoice(library, job.connectionId);
   const [effort, setEffort] = useState('connection');
   const model = library.connections.find(item => item.id === connection);
   const catalog = useCodexCatalog(model?.provider === 'codex');
