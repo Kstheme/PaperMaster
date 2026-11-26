@@ -1052,6 +1052,133 @@ test('deep-read generation language follows the interface unless overridden', as
   assert.equal((await call('settings/language', { method: 'PUT', json: { interface: 'fr' }, status: 400 })).error, '请选择界面语言。');
 });
 
+test('deleting a model connection waits for queued and running jobs', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-delete-connection-'));
+  let app;
+  t.after(async () => { await app?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const credentials = new Map();
+  const vault = {
+    async set(id, key) { credentials.set(id, key); },
+    async get(id) { return credentials.get(id); },
+    async delete(id) { credentials.delete(id); },
+  };
+  let release;
+  let failOnce = true;
+  const remoteFetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    const prompt = (Array.isArray(body.input) ? body.input[0].content[0].text : body.input) ||
+      body.messages?.[0]?.content || body.contents?.[0]?.parts?.[0]?.text;
+    if (prompt.includes('"focus":"先卡住"')) {
+      return new Promise((resolve, reject) => {
+        release = () => resolve(fixtureStream(url, { markdown: '保留下来的阅读', summary: '结论仍在' }));
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      });
+    }
+    if (prompt.includes('"focus":"先失败"') && failOnce) {
+      failOnce = false;
+      return new Response('', { status: 429 });
+    }
+    return fixtureStream(url, { markdown: '换连接后的阅读', summary: '续跑完成' });
+  };
+  app = await createApp({ directory, vault, remoteFetch });
+  const token = (await (await fetch(app.url + '/api/session')).json()).token;
+  const call = async (path, options = {}, expected = 200) => {
+    const response = await fetch(app.url + '/api/' + path, {
+      method: options.method || 'GET',
+      headers: { 'x-papermaster-session': token, ...(options.json ? { 'content-type': 'application/json' } : options.headers) },
+      body: options.json ? JSON.stringify(options.json) : options.body,
+    });
+    const type = response.headers.get('content-type') || '';
+    const value = type.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer());
+    assert.equal(response.status, expected, path + ': ' + JSON.stringify(value).slice(0, 400));
+    return value;
+  };
+  const post = (path, json, status) => call(path, { method: 'POST', json }, status ?? 200);
+  const settle = async id => {
+    for (let i = 0; i < 80; i++) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(30);
+    }
+    throw new Error('Job never finished');
+  };
+  const text = 'This article describes algorithms experiments and an attention mechanism using evaluated methods and assumptions.';
+  const paper = await call('papers?name=primary.pdf', {
+    method: 'POST', headers: { 'content-type': 'application/pdf' }, body: pdf('Primary paper', text),
+  }, 201);
+  const primary = await post('connections', { provider: 'openai', label: '阅读甲', model: 'fixture', key: 'fixture-key' }, 201);
+  const spare = await post('connections', { provider: 'gemini', label: '备用', model: 'spare', key: 'fixture-key' }, 201);
+  const other = await post('connections', { provider: 'claude', label: '阅读乙', model: 'fixture-claude', key: 'fixture-key' }, 201);
+  assert.equal((await call('library')).defaultConnection, primary.id);
+  assert.equal((await call('connections/' + spare.id, { method: 'DELETE' })).id, spare.id);
+  const kept = await call('library');
+  assert.equal(kept.defaultConnection, primary.id);
+  assert.equal(kept.connections.some(item => item.id === spare.id), false);
+  assert.equal(credentials.has(spare.id), false);
+  assert.equal(credentials.has(primary.id), true);
+
+  const held = await post('jobs', {
+    mode: 'skim', papers: [{ id: paper.id }], connectionId: primary.id, focus: '先卡住',
+  }, 202);
+  for (let i = 0; i < 80 && !release; i++) await delay(30);
+  assert.equal(typeof release, 'function');
+  assert.equal((await call('jobs/' + held.id)).status, 'running');
+  const queued = await post('jobs', {
+    mode: 'skim', papers: [{ id: paper.id }], connectionId: primary.id, focus: '先失败',
+  }, 202);
+  assert.equal(queued.status, 'queued');
+  await delay(40);
+  assert.equal((await call('jobs/' + queued.id)).status, 'queued');
+  const blocked = await call('connections/' + primary.id, { method: 'DELETE' }, 409);
+  assert.equal(blocked.code, 'connection_in_use');
+  assert.match(blocked.error, /排队或正在运行/);
+  assert.equal((await call('jobs/' + held.id)).status, 'running');
+  assert.equal((await call('jobs/' + queued.id)).status, 'queued');
+  const busyLibrary = await call('library');
+  assert.equal(busyLibrary.defaultConnection, primary.id);
+  assert.equal(busyLibrary.connections.some(item => item.id === primary.id), true);
+
+  release();
+  const done = await settle(held.id);
+  assert.equal(done.status, 'completed');
+  assert.equal(done.sections[0].model, 'fixture-openai');
+  assert.equal(done.sections[0].connectionId, primary.id);
+  assert.match(done.sections[0].markdown, /保留下来的阅读/);
+  const failed = await settle(queued.id);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.errorCode, 'model_limit');
+
+  assert.equal((await call('connections/' + primary.id, { method: 'DELETE' })).id, primary.id);
+  const library = await call('library');
+  assert.equal(library.defaultConnection, undefined);
+  assert.equal(library.connections.some(item => item.id === primary.id), false);
+  assert.equal(library.connections.some(item => item.id === other.id), true);
+  assert.equal(library.jobs.some(item => item.id === held.id && item.status === 'completed'), true);
+  assert.equal(credentials.has(primary.id), false);
+  assert.equal(credentials.has(other.id), true);
+  const archived = await call('jobs/' + held.id);
+  assert.equal(archived.sections[0].model, 'fixture-openai');
+  assert.equal(archived.sections[0].connectionId, primary.id);
+  assert.match((await call('jobs/' + held.id + '/note')).markdown, /模型：fixture-openai/);
+  assert.match((await call('jobs/' + held.id + '/note')).markdown, /保留下来的阅读/);
+
+  const rejected = await post('jobs/' + failed.id + '/resume', { connectionId: primary.id }, 400);
+  assert.match(rejected.error, /请选择模型连接/);
+  const resumed = await post('jobs/' + failed.id + '/resume', { connectionId: other.id }, 202);
+  const finished = await settle(resumed.id);
+  assert.equal(finished.status, 'completed');
+  assert.equal(finished.sections[0].connectionId, other.id);
+  assert.equal(finished.sections[0].model, 'fixture-claude');
+  assert.match(finished.sections[0].markdown, /换连接后的阅读/);
+  await post('jobs', { mode: 'skim', papers: [{ id: paper.id }], connectionId: primary.id }, 400);
+  const explicit = await post('jobs', { mode: 'skim', papers: [{ id: paper.id }], connectionId: other.id }, 202);
+  const next = await settle(explicit.id);
+  assert.equal(next.status, 'completed');
+  assert.equal(next.sections[0].connectionId, other.id);
+  assert.equal((await call('library')).defaultConnection, undefined);
+  await call('connections/00000000-0000-0000-0000-000000000099', { method: 'DELETE' }, 404);
+});
+
 test('import targets accept only the supported public hosts', () => {
   assert.equal(arxivLink('https://arxiv.org/pdf/1706.03762v7.pdf').baseId, '1706.03762');
   assert.equal(githubLink('https://github.com/tensorflow/tensor2tensor.git'), 'https://github.com/tensorflow/tensor2tensor');

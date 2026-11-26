@@ -11,7 +11,7 @@ import { openLibrary, writeAtomic } from './library.js';
 import { credentialVault } from './credentials.js';
 import { AppError, requiredText } from './errors.js';
 import { attachRepository, importPaper, loadPaper, PDF_LIMIT } from './import.js';
-import { createReadingService, modes } from './reading.js';
+import { connectionInUse, createReadingService, modes } from './reading.js';
 import { readingFigureParts, splitReadingMarkdown } from './reading-markdown.js';
 import { components, figureChapter, figureKeys } from './reading-figures.js';
 import { solveDemo } from './interaction-math.js';
@@ -207,6 +207,15 @@ async function route(req, res, url, { library, reader, models, followups, highli
     }
     if (id && action === 'check' && method === 'POST') {
       return json(res, await models.check(get('connections', id), AbortSignal.timeout(60_000)));
+    }
+    if (id && !action && method === 'DELETE') {
+      return json(res, await serialized(() => {
+        const connection = get('connections', id);
+        if (connectionInUse(library.all('jobs'), connection.id)) {
+          throw new AppError('此连接还有排队或正在运行的任务，请等任务结束后再删除。', 409, 'connection_in_use');
+        }
+        return models.remove(connection.id);
+      }));
     }
     if (id && !action && method === 'PATCH') {
       const { model, effort } = await body(req);
