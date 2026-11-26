@@ -14,6 +14,15 @@ export function useAction(onError) {
   return [run, busy];
 }
 
+export function useConnectionChoice(library, preferred) {
+  const [connection, setConnection] = useState(() => (
+    library.connections.some(item => item.id === preferred) ? preferred : ''));
+  useEffect(() => {
+    setConnection(current => library.connections.some(item => item.id === current) ? current : '');
+  }, [library]);
+  return [connection, setConnection];
+}
+
 export function ConnectionPicker({ library, value, onChange }) {
   return <label>使用连接<select value={value || ''} onChange={event => onChange(event.target.value)} required>
     <option value="" disabled>选择模型连接</option>
