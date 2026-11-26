@@ -86,6 +86,19 @@ test('confirmed reading decisions flow from a pinned source to a matching immuta
         const saved = Object.keys(content.savedCode)[0];
         output = { rows: [{
           relevance: { kind: 'direct', reason: '用几何候选生成限定几何推理的搜索范围', evidence: [{ kind: 'paper', page: 1, quote }] },
+          metaMethod: {
+            structuralProblem: { text: '几何搜索范围需要先被限定', state: 'known' },
+            mechanism: { text: '先生成有界候选再筛选', state: 'known' },
+            conditions: { text: '输入有界且候选可以被核验', state: 'known' },
+          },
+          practice: { text: '几何例子中的有界候选生成', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+          experiment: {
+            metric: { text: '分数', state: 'known' },
+            comparison: { text: 'Method A 对照 Method B', state: 'known' },
+            data: { text: 'Table 1 主实验', state: 'known' },
+            result: { text: 'Method A 得 21 分', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+            outcome: 'effective',
+          },
           fields: {
             name: { text: '有界候选生成', state: 'known' },
             problem: { text: '如何找出候选', state: 'known' },
@@ -237,6 +250,10 @@ test('confirmed reading decisions flow from a pinned source to a matching immuta
   assert.equal(firstCandidate.idea, '迁移到新任务');
   const one = await call(root + '/apply', { token: draft.token, items: [{ id: firstCandidate.id }] });
   const row = one.rows[0];
+  assert.equal(row.metaMethod.mechanism.text, '先生成有界候选再筛选');
+  assert.equal(row.practice.text, '几何例子中的有界候选生成');
+  assert.equal(row.experiment.outcome, 'effective');
+  assert.equal(row.topicReason, undefined);
   const edited = await call(root + '/rows/' + row.id, { revision: one.revision,
     fields: { conditions: { text: '手工确认条件', state: 'known' } } }, 200, 'PATCH');
   const snapshotId = randomUUID();
@@ -574,6 +591,228 @@ test('startup recovers an active job as interrupted', async t => {
     assert.equal(job.planned.length, 4);
     assert.equal(job.sections[0].markdown, '已保存');
   } finally { await app.close(); }
+});
+
+test('meta-method candidates keep one evidence record for each practice', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-meta-method-'));
+  let app;
+  t.after(async () => { await app?.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const prompts = [];
+  const mechanism = '先用局部约束生成有界候选，再做廉价验证';
+  const conditions = '候选可由局部约束枚举，且逐个验证的代价低';
+  const structuralProblem = '组合搜索空间过大，穷举不可行';
+  const codex = {
+    models: async () => [{ id: 'full', label: 'Full', efforts: ['low'], defaultEffort: 'low', isDefault: true }],
+    async generate({ model, prompt }) {
+      prompts.push(prompt);
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      const page = content.pages?.map(item => item.text).join('\n') || '';
+      let output = { rows: [] };
+      if (prompt.startsWith('任务：PaperMaster 主题方法表提炼')) {
+        if (page.includes('insufficient material')) output = { rows: [] };
+        else if (page.includes('KEYWORD OVERLAP ONLY')) output = { rows: [practiceRow({
+          name: '标题关键词索引', practice: '只按标题关键词收集论文',
+          quote: 'Keyword overlap does not share a mechanism with the topic.',
+          mechanism: '按标题关键词检索论文', conditions: '只要标题共享关键词',
+        })] };
+        else if (page.includes('UNSOURCED CLAIM')) output = { rows: [practiceRow({
+          name: '缺少出处的做法', practice: '声称使用了有界候选但正文没有这句话',
+          quote: 'not written in this paper', mechanism, conditions,
+        })] };
+        else if (page.includes('GRASP GENERATION')) output = { rows: [practiceRow({
+          name: '有界抓取生成', practice: '机械臂先生成有界抓取候选再排序',
+          quote: 'Grasp generation proposes a bounded set and then ranks it.',
+          mechanism, conditions, outcome: 'effective',
+          result: '成功率从 21 升到 42', resultQuote: 'Success rate rises from 21 to 42 against exhaustive search.',
+        })] };
+        else if (page.includes('CONTACT RANKING')) output = { rows: [
+          practiceRow({
+            name: '接触排序无明显改善', practice: '蛋白质接触图沿用有界候选后与更强基线持平',
+            quote: 'No clear gain remains after the stronger baseline.',
+            mechanism, conditions, outcome: 'no_improvement',
+            result: '与更强基线相比没有明显提升', resultQuote: 'No clear gain remains after the stronger baseline.',
+          }),
+          practiceRow({
+            name: '接触条件失败', practice: '放宽局部约束后有界候选验证失败',
+            quote: 'The altered condition fails and lowers the contact score.',
+            mechanism, conditions, outcome: 'failure',
+            result: '放松约束后接触分数下降', resultQuote: 'The altered condition fails and lowers the contact score.',
+          }),
+        ] };
+        else if (page.includes('UNMEASURED MECHANISM')) output = { rows: [practiceRow({
+          name: '未测量的有界提议', practice: '只解释有界提议如何缩小搜索',
+          quote: 'The mechanism explains bounded proposal without a measured effect.',
+          mechanism, conditions,
+        })] };
+      } else if (prompt.startsWith('任务：PaperMaster 主题相关性复核')) {
+        output = { decisions: content.items.map(item => ({ id: item.id, direct: item.mechanism === mechanism && item.conditions === conditions &&
+          item.structuralProblem === structuralProblem })) };
+      }
+      return { text: JSON.stringify(output), model };
+    },
+  };
+  function practiceRow({ name, practice, quote, mechanism: methodMechanism, conditions: methodConditions, outcome, result, resultQuote }) {
+    const source = text => [{ kind: 'paper', page: 1, quote: text }];
+    return {
+      relevance: { kind: 'direct', reason: '结构性问题、作用机制和适用前提与主题匹配', evidence: source(quote) },
+      metaMethod: {
+        structuralProblem: { text: structuralProblem, state: 'known' },
+        mechanism: { text: methodMechanism, state: 'known' },
+        conditions: { text: methodConditions, state: 'known' },
+      },
+      practice: { text: practice, state: 'known', evidence: source(quote) },
+      ...(outcome ? { experiment: {
+        metric: { text: '成功率', state: 'known' },
+        comparison: { text: '对照无界穷举或更强基线', state: 'known' },
+        data: { text: '固定预算的合成数据', state: 'known' },
+        result: { text: result, state: 'known', evidence: source(resultQuote) },
+        outcome,
+      } } : { experiment: null }),
+      fields: {
+        name: { text: name, state: 'known' },
+        problem: { text: structuralProblem, state: 'known' },
+        pipeline: { text: methodMechanism, state: 'known' },
+        conditions: { text: methodConditions, state: 'known' },
+      },
+    };
+  }
+  app = await createApp({ directory, codex });
+  const { token } = await (await fetch(app.url + '/api/session')).json();
+  async function call(path, input, status = 200, method = input === undefined ? 'GET' : 'POST') {
+    const response = await fetch(app.url + '/api/' + path, { method,
+      headers: { 'X-PaperMaster-Session': token, ...(input !== undefined && { 'content-type': 'application/json' }) },
+      ...(input !== undefined && { body: JSON.stringify(input) }) });
+    const result = response.headers.get('content-type').includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(result));
+    return result;
+  }
+  async function upload(name, title, ...sentences) {
+    const text = [...sentences, 'Method details continue in the appendix with additional constraints and parameters for the reported procedure.'].join('\n');
+    const response = await fetch(app.url + '/api/papers?name=' + name, { method: 'POST',
+      headers: { 'X-PaperMaster-Session': token, 'content-type': 'application/pdf' }, body: pdf(title, text) });
+    assert.equal(response.status, 201, title);
+    const paper = await response.json();
+    assert.equal(paper.title, title);
+    return paper;
+  }
+  const grasp = await upload('grasp.pdf', 'Robot Grasp',
+    'GRASP GENERATION',
+    'Bounded candidates reduce search before any domain score.',
+    'Local constraints enumerate candidates and the check stays cheap.',
+    'Grasp generation proposes a bounded set and then ranks it.',
+    'Success rate rises from 21 to 42 against exhaustive search.');
+  const keyword = await upload('keyword.pdf', 'Keyword Index',
+    'KEYWORD OVERLAP ONLY',
+    'Keyword overlap does not share a mechanism with the topic.',
+    'The title keyword index only lists matching words.');
+  const insufficient = await upload('empty.pdf', 'Insufficient Note',
+    'This paper has insufficient material for a method claim today.');
+  const unsourced = await upload('unsourced.pdf', 'Unsourced Claim',
+    'UNSOURCED CLAIM',
+    'The structural account is present in the source note.');
+  const protein = await upload('protein.pdf', 'Protein Contacts',
+    'CONTACT RANKING',
+    'Contact ranking keeps the same bounded proposal mechanism.',
+    'No clear gain remains after the stronger baseline.',
+    'The altered condition fails and lowers the contact score.');
+  const theory = await upload('theory.pdf', 'Theory Sketch',
+    'UNMEASURED MECHANISM',
+    'The mechanism explains bounded proposal without a measured effect.',
+    'Conditions require enumerable local constraints.');
+  const table = await call('method-tables', { title: '有界搜索' }, 201);
+  const root = 'method-tables/' + table.id;
+  const oldId = randomUUID();
+  const snapshotId = randomUUID();
+  const version = grasp.versions[0];
+  const oldRow = {
+    id: oldId,
+    paper: { paperId: grasp.id, versionId: version.id, title: grasp.title, version: version.name },
+    fields: {
+      name: { text: '旧方法', state: 'known', evidence: [] },
+      problem: { text: '旧问题', state: 'known', evidence: [] },
+      pipeline: { text: '旧流程', state: 'known', evidence: [] },
+      conditions: { text: '旧条件', state: 'known', evidence: [] },
+    },
+    idea: '旧设想',
+  };
+  const library = await openLibrary(directory);
+  try {
+    library.put('methodTables', { ...table, rows: [oldRow] });
+    library.put('deliveries', { id: snapshotId, tableId: table.id, schemaVersion: 1, topic: table.title,
+      confirmedAt: '2020-01-01T00:00:00.000Z', rows: [{ id: oldRow.id, paper: oldRow.paper, fields: oldRow.fields, idea: oldRow.idea }] });
+  } finally { library.close(); }
+  const ref = paper => ({ id: paper.id, versionId: paper.versions[0].id });
+  const topicScope = '缩小组合搜索空间。机制是先用局部约束生成有界候选，再做廉价验证。前提是候选可被局部约束枚举且验证代价低。不限应用领域。';
+  const connection = await call('connections', { provider: 'codex', model: 'full' }, 201);
+  const draft = await call(root + '/candidates', { connectionId: connection.id, papers: [grasp, keyword, protein, theory].map(ref), topicScope });
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /元方法/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /结构性问题/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /跨领域/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /仅共享关键词/);
+  assert.match(prompts.find(item => item.startsWith('任务：PaperMaster 主题方法表提炼')), /原论文未验证效果/);
+  const reviewPrompt = prompts.find(item => item.startsWith('任务：PaperMaster 主题相关性复核'));
+  assert.match(reviewPrompt, /作用机制和适用前提/);
+  assert.match(reviewPrompt, /另一个领域/);
+  assert.match(reviewPrompt, /仅共享关键词/);
+  assert.match(reviewPrompt, /按标题关键词检索论文/);
+  assert.match(reviewPrompt, /Robot Grasp/);
+  assert.deepEqual(draft.rows.map(row => row.fields.name.text).sort(), ['有界抓取生成', '接触排序无明显改善', '接触条件失败', '未测量的有界提议'].sort());
+  assert.equal(draft.rows.some(row => row.fields.name.text === '标题关键词索引'), false);
+  const graspCandidate = draft.rows.find(row => row.paper.title === 'Robot Grasp');
+  assert.equal(graspCandidate.metaMethod.structuralProblem.text, structuralProblem);
+  assert.equal(graspCandidate.metaMethod.mechanism.text, mechanism);
+  assert.equal(graspCandidate.metaMethod.conditions.text, conditions);
+  assert.equal(graspCandidate.practice.evidence[0].kind, 'paper');
+  assert.equal(graspCandidate.practice.evidence[0].page, 1);
+  assert.equal(graspCandidate.experiment.outcome, 'effective');
+  assert.equal(graspCandidate.experiment.metric.text, '成功率');
+  assert.equal(graspCandidate.experiment.comparison.text, '对照无界穷举或更强基线');
+  assert.equal(graspCandidate.experiment.data.text, '固定预算的合成数据');
+  assert.equal(graspCandidate.experiment.result.evidence[0].page, 1);
+  const proteinCandidates = draft.rows.filter(row => row.paper.title === 'Protein Contacts');
+  assert.equal(proteinCandidates.length, 2);
+  assert.equal(new Set(proteinCandidates.map(row => row.id)).size, 2);
+  assert.notEqual(proteinCandidates[0].practice.text, proteinCandidates[1].practice.text);
+  assert.deepEqual(proteinCandidates.map(row => row.experiment.outcome).sort(), ['failure', 'no_improvement']);
+  assert.equal(proteinCandidates[0].metaMethod.mechanism.text, proteinCandidates[1].metaMethod.mechanism.text);
+  const unmeasured = draft.rows.find(row => row.paper.title === 'Theory Sketch');
+  assert.equal(unmeasured.effectCheck, '原论文未验证效果');
+  assert.equal(unmeasured.experiment, undefined);
+  const applied = await call(root + '/apply', { token: draft.token, items: draft.rows.map(row => ({ id: row.id })) });
+  const saved = await call(root);
+  assert.equal(saved.revision, applied.revision);
+  assert.equal(saved.rows.length, 5);
+  const legacy = saved.rows.find(row => row.id === oldId);
+  assert.equal(legacy.fields.problem.text, '旧问题');
+  assert.equal(legacy.fields.pipeline.text, '旧流程');
+  assert.equal(legacy.fields.conditions.text, '旧条件');
+  assert.equal(legacy.idea, '旧设想');
+  assert.equal(legacy.metaMethod, undefined);
+  const storedGrasp = saved.rows.find(row => row.id === graspCandidate.id);
+  assert.equal(storedGrasp.topicReason, undefined);
+  assert.deepEqual(storedGrasp.metaMethod, graspCandidate.metaMethod);
+  assert.deepEqual(storedGrasp.practice, graspCandidate.practice);
+  assert.deepEqual(storedGrasp.experiment, graspCandidate.experiment);
+  const storedProtein = saved.rows.filter(row => row.paper.title === 'Protein Contacts');
+  assert.deepEqual(storedProtein.map(row => row.practice.text).sort(), proteinCandidates.map(row => row.practice.text).sort());
+  assert.equal(saved.rows.find(row => row.id === unmeasured.id).effectCheck, '原论文未验证效果');
+  const patched = await call(root + '/rows/' + oldId, { revision: saved.revision,
+    fields: { conditions: { text: '旧条件仍可改', state: 'known' } } }, 200, 'PATCH');
+  assert.equal(patched.rows.find(row => row.id === oldId).fields.conditions.text, '旧条件仍可改');
+  assert.equal(patched.rows.find(row => row.id === oldId).metaMethod, undefined);
+  assert.equal(patched.rows.find(row => row.id === storedGrasp.id).metaMethod.mechanism.text, mechanism);
+  const markdown = await call(root + '/download/' + snapshotId + '?format=markdown');
+  const snapshot = await call(root + '/download/' + snapshotId);
+  assert.match(markdown, /旧方法/);
+  assert.match(markdown, /旧条件/);
+  assert.doesNotMatch(markdown, /旧条件仍可改|有界抓取生成/);
+  assert.equal(snapshot.rows.length, 1);
+  assert.equal(snapshot.rows[0].fields.conditions.text, '旧条件');
+  assert.equal(snapshot.schemaVersion, 1);
+  const empty = await call(root + '/candidates', { connectionId: connection.id, papers: [ref(insufficient)], topicScope });
+  assert.deepEqual(empty.rows, []);
+  const missing = await call(root + '/candidates', { connectionId: connection.id, papers: [ref(unsourced)], topicScope });
+  assert.deepEqual(missing.rows, []);
 });
 
 test('import targets accept only the supported public hosts', () => {
