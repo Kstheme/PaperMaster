@@ -1179,6 +1179,177 @@ test('deleting a model connection waits for queued and running jobs', async t =>
   await call('connections/00000000-0000-0000-0000-000000000099', { method: 'DELETE' }, 404);
 });
 
+test('follow-ups and method candidates follow the generation language without rewriting stored text', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'papermaster-bilingual-rest-'));
+  const prompts = [];
+  const quote = 'attention mechanism using evaluated methods';
+  const candidateRow = {
+    relevance: { kind: 'direct', reason: 'The mechanism matches the topic', evidence: [{ kind: 'paper', page: 1, quote }] },
+    metaMethod: {
+      structuralProblem: { text: 'Search needs a bound', state: 'known' },
+      mechanism: { text: 'Generate a bounded set first', state: 'known' },
+      conditions: { text: 'Inputs are bounded', state: 'known' },
+    },
+    practice: { text: 'Bounded generation in this paper', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+    experiment: {
+      metric: { text: 'Score', state: 'known' },
+      comparison: { text: 'Method A against Method B', state: 'known' },
+      data: { text: 'The reported table', state: 'known' },
+      result: { text: 'Method A scores 21', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+      outcome: 'effective',
+    },
+    fields: {
+      name: { text: 'Bounded generation', state: 'known' },
+      problem: { text: 'How to find candidates', state: 'known' },
+      pipeline: { text: 'Point to generation to candidates', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+      conditions: { text: 'Bounded inputs', state: 'known', evidence: [{ kind: 'paper', page: 1, quote }] },
+    },
+  };
+  const remoteFetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    const prompt = typeof body.input === 'string' ? body.input : '';
+    prompts.push(prompt);
+    if (prompt.startsWith('Task: PaperMaster reading follow-up') || prompt.startsWith('任务：PaperMaster 阅读追问')) {
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      return fixtureStream(url, {
+        answer: content.question === '再问一次' ? 'later answer stays separate' : 'stored follow-up answer',
+        evidence: [{ kind: 'paper', page: 1, quote }],
+      });
+    }
+    if (prompt.startsWith('Task: PaperMaster method-table candidates')) return fixtureStream(url, { rows: [candidateRow] });
+    if (prompt.startsWith('任务：PaperMaster 主题方法表提炼')) return fixtureStream(url, { rows: [] });
+    if (prompt.startsWith('任务：PaperMaster 主题相关性复核')) {
+      const content = JSON.parse(prompt.split('\n\n').at(-1));
+      return fixtureStream(url, { decisions: content.items.map(item => ({ id: item.id, direct: true })) });
+    }
+    return fixtureStream(url, { summary: 'kept', takeaways: ['one'], markdown: 'stored reading body' });
+  };
+  const app = await createApp({ directory, remoteFetch });
+  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true, maxRetries: 3 }); });
+  const token = (await (await fetch(app.url + '/api/session')).json()).token;
+  async function call(path, { method = 'GET', json, status = 200 } = {}) {
+    const response = await fetch(app.url + '/api/' + path, {
+      method,
+      headers: { 'x-papermaster-session': token, ...(json !== undefined && { 'content-type': 'application/json' }) },
+      ...(json !== undefined && { body: JSON.stringify(json) }),
+    });
+    const value = response.headers.get('content-type')?.includes('json') ? await response.json() : await response.text();
+    assert.equal(response.status, status, path + ' ' + JSON.stringify(value));
+    return value;
+  }
+  async function finish(id) {
+    for (let index = 0; index < 80; index += 1) {
+      const job = await call('jobs/' + id);
+      if (!['queued', 'running'].includes(job.status)) return job;
+      await delay(20);
+    }
+    throw new Error('deep read did not finish');
+  }
+
+  const uploaded = await fetch(app.url + '/api/papers?name=bilingual.pdf', {
+    method: 'POST', headers: { 'x-papermaster-session': token, 'content-type': 'application/pdf' },
+    body: pdf('Language paper', 'This article describes algorithms experiments and an attention mechanism using evaluated methods and assumptions.'),
+  });
+  assert.equal(uploaded.status, 201);
+  const paper = await uploaded.json();
+  const connection = await call('connections', { method: 'POST', json: { provider: 'openai', model: 'fixture', key: 'fixture-key' }, status: 201 });
+  const job = await finish((await call('jobs', {
+    method: 'POST', status: 202, json: { mode: 'deep', papers: [{ id: paper.id }], connectionId: connection.id },
+  })).id);
+  assert.equal(job.sections[0].title, '论文速览');
+  assert.equal(job.sections[0].markdown, 'stored reading body');
+  const existing = await call('papers/' + paper.id + '/note');
+  const handwritten = await call('papers/' + paper.id + '/note', {
+    method: 'PUT', json: { markdown: existing.markdown + '\n\nHandwritten note stays put.', revision: existing.revision },
+  });
+  prompts.length = 0;
+
+  const followed = await call('settings/language', { method: 'PUT', json: { interface: 'en' } });
+  assert.deepEqual(followed, { interface: 'en', generation: null, effective: 'en' });
+  const threadId = randomUUID();
+  const englishFollow = await call('jobs/' + job.id + '/followups', {
+    method: 'POST',
+    json: {
+      threadId, turnId: randomUUID(), question: 'What does the mechanism assume?', connectionId: connection.id,
+      position: { section: 'overview', text: 'stored reading body' },
+    },
+  });
+  assert.equal(englishFollow.turns[0].answer, 'stored follow-up answer');
+  assert.equal(englishFollow.turns[0].evidence[0].page, 1);
+  assert.equal(englishFollow.turns[0].evidence[0].title, paper.title);
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].startsWith('Task: PaperMaster reading follow-up. Write in English.'));
+  assert.ok(!prompts[0].includes('使用中文'));
+  const noted = await call('jobs/' + job.id + '/followup-note/' + threadId, {
+    method: 'POST',
+    json: {
+      turnId: englishFollow.turns[0].id, text: 'Handwritten excerpt stays.', observation: 'keep this idea',
+      kind: 'idea', saveId: randomUUID(),
+    },
+  });
+  assert.match(noted.markdown, /Handwritten note stays put\./);
+  assert.match(noted.markdown, /Handwritten excerpt stays\./);
+  assert.match(noted.markdown, /提问位置/);
+  const table = await call('method-tables', { method: 'POST', json: { title: 'Geometric reasoning' }, status: 201 });
+  const draft = await call('method-tables/' + table.id + '/candidates', {
+    method: 'POST', json: { papers: [{ id: paper.id, versionId: paper.versionId }], connectionId: connection.id },
+  });
+  assert.equal(draft.rows[0].fields.name.text, 'Bounded generation');
+  const applied = await call('method-tables/' + table.id + '/apply', {
+    method: 'POST', json: { token: draft.token, items: [{ id: draft.rows[0].id }] },
+  });
+  assert.equal(prompts.length, 3);
+  assert.ok(prompts[1].startsWith('Task: PaperMaster method-table candidates. Write the candidate rows in English.'));
+  assert.ok(!prompts[1].includes('用中文输出候选行'));
+  assert.ok(prompts[2].startsWith('任务：PaperMaster 主题相关性复核'));
+  const stored = {
+    note: noted.markdown,
+    follow: englishFollow,
+    row: applied.rows[0],
+    title: job.sections[0].title,
+    markdown: job.sections[0].markdown,
+    paperTitle: paper.title,
+    citation: englishFollow.turns[0].evidence[0],
+  };
+  prompts.length = 0;
+
+  const override = await call('settings/language', { method: 'PUT', json: { generation: 'zh' } });
+  assert.deepEqual(override, { interface: 'en', generation: 'zh', effective: 'zh' });
+  await call('jobs/' + job.id + '/followups', {
+    method: 'POST',
+    json: {
+      threadId: randomUUID(), turnId: randomUUID(), question: '再问一次', connectionId: connection.id,
+      position: { section: 'overview', text: 'stored reading body' },
+    },
+  });
+  const emptyDraft = await call('method-tables/' + table.id + '/candidates', {
+    method: 'POST', json: { papers: [{ id: paper.id, versionId: paper.versionId }], connectionId: connection.id },
+  });
+  assert.deepEqual(emptyDraft.rows, []);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts[0].startsWith('任务：PaperMaster 阅读追问。使用中文'));
+  assert.ok(!prompts[0].includes('Write in English.'));
+  assert.ok(prompts[1].startsWith('任务：PaperMaster 主题方法表提炼'));
+  assert.ok(prompts[1].includes('用中文输出候选行'));
+  assert.ok(!prompts[1].includes('Write the candidate rows in English.'));
+
+  async function assertStored() {
+    const threads = await call('jobs/' + job.id + '/followups');
+    assert.deepEqual(threads.find(item => item.id === threadId), stored.follow);
+    assert.equal((await call('papers/' + paper.id + '/note')).markdown, stored.note);
+    assert.deepEqual((await call('method-tables/' + table.id)).rows[0], stored.row);
+    const kept = await call('jobs/' + job.id);
+    assert.equal(kept.sections[0].title, stored.title);
+    assert.equal(kept.sections[0].markdown, stored.markdown);
+    assert.equal((await call('library')).papers.find(item => item.id === paper.id).title, stored.paperTitle);
+    assert.deepEqual(threads.find(item => item.id === threadId).turns[0].evidence[0], stored.citation);
+  }
+  await assertStored();
+  const switched = await call('settings/language', { method: 'PUT', json: { interface: 'zh', generation: null } });
+  assert.deepEqual(switched, { interface: 'zh', generation: null, effective: 'zh' });
+  await assertStored();
+});
+
 test('import targets accept only the supported public hosts', () => {
   assert.equal(arxivLink('https://arxiv.org/pdf/1706.03762v7.pdf').baseId, '1706.03762');
   assert.equal(githubLink('https://github.com/tensorflow/tensor2tensor.git'), 'https://github.com/tensorflow/tensor2tensor');
