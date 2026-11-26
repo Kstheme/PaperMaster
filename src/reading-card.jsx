@@ -1,7 +1,6 @@
 import React, { useId } from 'react';
 
 // Shared deep-reading card. Slot order: title, actions, result, evidence, save.
-// Ticket #33 should reuse this shell; only the formula path uses it now.
 function Region({ label, className, children }) {
   const id = useId();
   return <div className={'reading-card-region ' + className} role="region" aria-labelledby={id}>

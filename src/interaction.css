@@ -7,11 +7,8 @@
 .chapter-figure { min-width: 0; container-type: inline-size; margin: 1.5rem 0; }
 .chapter-figure .experiment-table { margin-bottom: .6rem; }
 .reading-sources { margin: 1rem 0; }
-.inline-flow { display: grid; gap: 12px; padding: clamp(12px, 2.4vw, 22px); margin: 0; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 9px; }
-.inline-flow figcaption > h3 { font: 700 clamp(21px, 3vw, 28px)/1.24 var(--display); }
-.inline-flow figcaption .markdown { max-width: 71ch; }
-.inline-flow .module-detail { padding: 11px 13px; background: var(--inset); }
+.inline-flow { margin: 0; }
+.inline-flow .reading-card-header .markdown { max-width: 71ch; }
 .module-source { display: inline-block; overflow-wrap: anywhere; font: 12px/1.5 "Cascadia Mono", Consolas, monospace; }
 .flow-controls button { font-size: 13px; }
 .animated-flow-edge { animation: trace-data-flow 1.2s linear infinite; stroke-linecap: round; }
@@ -52,6 +49,12 @@
 .reading-card .lab-results { margin-block: 0; }
 .reading-card .lab-note { margin-top: 0; }
 .reading-card .source-preview:last-child { border-bottom: 0; padding-bottom: 0; }
+.reading-card .module-detail { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.reading-card .experiment-controls { margin: 0; }
+.reading-card .experiment-controls select { min-height: 44px; }
+.reading-card .experiment-scroll { margin: 0; }
+.reading-card .figure-question { margin-top: 0; }
+.reading-card-evidence pre, .repository-pane pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .module-detail { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px 28px; }
 .module-detail dl { display: grid; gap: 3px; margin: 0; }
 .module-detail dl > div { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); }
@@ -109,6 +112,8 @@
   .module-detail, .lab-stage { grid-template-columns: minmax(0,1fr); }
   .reading-card .lab-inputs { order: -1; }
   .reading-card-toolbar > button { flex: 1 1 100%; justify-content: center; }
+  .reading-card .experiment-controls > label { flex-basis: 100%; }
+  .experiment-compare { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 570px) {
   .lab-input input[type="range"] { min-height: 44px; }
@@ -134,16 +139,20 @@
   container-type: inline-size;
   line-height: 1.65;
 }
-.repository-workbench-header {
+.repository-card-intro {
   display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 24px;
-  padding: clamp(16px, 2.5vw, 24px);
-  background: var(--background);
-  border-radius: 15px 15px 0 0;
 }
-.repository-workbench-header > div { flex: 1 1 260px; min-width: 0; }
+.repository-card-intro > p { flex: 1 1 260px; min-width: 0; margin: 0; max-width: 46ch; }
 .repository-workbench h3 { font: 700 clamp(22px, 2.1vw, 31px)/1.25 var(--display); }
 .repository-workbench h4 { font-size: 17px; }
-.repository-workbench-header p { color: var(--muted); margin-top: 8px; max-width: 46ch; font-size: 14px; }
+.reading-card.repository-workbench .repository-views,
+.reading-card.repository-workbench .repository-view { padding-inline: 0; }
+.reading-card.repository-workbench .repository-view { padding-block: 0; }
+.reading-card.repository-workbench .repository-steps { margin-bottom: 0; }
+.reading-card.repository-workbench .evidence-links {
+  flex: 1 1 230px; padding: 0; margin: 0; display: flex; gap: 4px 14px; flex-wrap: wrap; list-style: none;
+}
+.reading-card.repository-workbench .evidence-links a { display: inline-flex; align-items: center; min-height: 32px; overflow-wrap: anywhere; }
 .repository-commit {
   display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; min-height: 44px;
   color: var(--muted); font: 13px "Cascadia Mono", Consolas, monospace;
@@ -179,7 +188,6 @@
 .repository-fields dd, .repository-fields dd p, .repository-readout p { margin: 0; }
 .repository-sample-description { margin-bottom: 10px; }
 .repository-pane summary, .repository-demo-details summary { align-content: center; color: var(--accent); }
-.repository-pane pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .repository-pair pre, .repository-comparison pre { background: var(--background); border-radius: 6px; padding: 10px; font-size: 13px; }
 .repository-sources { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .repository-sources .evidence-links { flex: 1 1 230px; padding: 0; margin: 0; display: flex; gap: 4px 14px; flex-wrap: wrap; list-style: none; }
