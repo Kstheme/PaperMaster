@@ -182,6 +182,23 @@ h3 { font-size: 16px; }
 .method-matrix th { background: var(--inset); text-align: left; }
 .method-matrix th, .method-matrix td { border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; }
 .method-matrix td:nth-child(n+3):nth-child(-n+7) { min-width: 112px; max-width: 275px; }
+.meta-method-group { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.meta-method-group h3 { margin-bottom: 4px; }
+.meta-method-summary { display: grid; gap: 4px; margin: 8px 0 12px; }
+.meta-method-summary div { display: grid; gap: 2px; }
+.meta-method-summary dt { color: var(--muted); font-size: 13px; }
+.meta-method-summary dd { margin: 0; }
+.method-compare { overflow: auto; }
+.method-compare table { border-collapse: collapse; width: max-content; min-width: 100%; }
+.method-compare th, .method-compare td { border-bottom: 1px solid var(--line); padding: 8px; vertical-align: top; text-align: left; }
+.method-compare thead th { background: var(--inset); min-width: 240px; max-width: 340px; }
+.method-compare tbody th { width: 6.5em; min-width: 6.5em; color: var(--muted); font-weight: 650; background: var(--background); position: sticky; left: 0; }
+.method-compare td { min-width: 240px; max-width: 340px; }
+.method-outcome { font-weight: 700; }
+.method-outcome[data-outcome="effective"] { color: var(--green); }
+.method-outcome[data-outcome="no_improvement"] { color: var(--signal); }
+.method-outcome[data-outcome="failure"] { color: var(--error); }
+.method-unverified { display: inline-block; margin: 0; padding: 2px 8px; border-radius: 999px; background: var(--signal-tint); color: var(--signal); font-weight: 700; }
 .method-cell-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .method-field, .method-row-editor { display: grid; gap: 8px; }
 .method-row-editor { width: min(310px, 65vw); padding: 12px 0; }

@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createApp } from '../server/http.js';
 import { openLibrary } from '../server/library.js';
 import { arxivLink, githubLink } from '../server/import.js';
+import { groupMethodRecords } from '../src/method-groups.js';
 
 // Build a minimal text PDF (or a page containing only a graphic) without committing fixtures.
 function pdf(title, text) {
@@ -810,6 +811,31 @@ test('meta-method candidates keep one evidence record for each practice', async 
   assert.equal(patched.rows.find(row => row.id === oldId).fields.conditions.text, '旧条件仍可改');
   assert.equal(patched.rows.find(row => row.id === oldId).metaMethod, undefined);
   assert.equal(patched.rows.find(row => row.id === storedGrasp.id).metaMethod.mechanism.text, mechanism);
+  const groups = groupMethodRecords(saved.rows);
+  assert.deepEqual(groups.map(group => group.kind), ['meta', 'legacy']);
+  assert.equal(groups[0].mechanism, mechanism);
+  assert.equal(groups[0].structuralProblem, structuralProblem);
+  assert.equal(groups[0].rows.length, 4);
+  assert.deepEqual(groups[0].rows.map(row => row.paper.title).sort(), ['Protein Contacts', 'Protein Contacts', 'Robot Grasp', 'Theory Sketch']);
+  const grouped = Object.fromEntries(groups[0].rows.map(row => [row.practice.text, row]));
+  assert.equal(grouped['机械臂先生成有界抓取候选再排序'].experiment.outcome, 'effective');
+  assert.equal(grouped['蛋白质接触图沿用有界候选后与更强基线持平'].experiment.outcome, 'no_improvement');
+  assert.equal(grouped['放宽局部约束后有界候选验证失败'].experiment.outcome, 'failure');
+  assert.equal(grouped['只解释有界提议如何缩小搜索'].effectCheck, '原论文未验证效果');
+  assert.equal(grouped['只解释有界提议如何缩小搜索'].experiment, undefined);
+  for (const row of groups[0].rows) {
+    assert.notEqual(row.practice.text, '');
+    assert.equal(row.practice.evidence[0].kind, 'paper');
+    assert.equal(row.metaMethod.conditions.text, conditions);
+    assert.equal(row.paper.title.length > 0, true);
+    assert.notEqual(row.paper.versionId, undefined);
+  }
+  assert.equal(new Set(groups[0].rows.map(row => row.id)).size, 4);
+  assert.equal(new Set(groups[0].rows.map(row => row.practice.text)).size, 4);
+  assert.equal(groups[1].rows[0].id, oldId);
+  assert.equal(groups[1].rows[0].metaMethod, undefined);
+  assert.equal(groups[1].rows[0].fields.name.text, '旧方法');
+  assert.equal(groups[1].rows[0].fields.conditions.text, '旧条件');
   const markdown = await call(root + '/download/' + snapshotId + '?format=markdown');
   const snapshot = await call(root + '/download/' + snapshotId);
   assert.match(markdown, /旧方法/);
@@ -822,6 +848,57 @@ test('meta-method candidates keep one evidence record for each practice', async 
   assert.deepEqual(empty.rows, []);
   const missing = await call(root + '/candidates', { connectionId: connection.id, papers: [ref(unsourced)], topicScope });
   assert.deepEqual(missing.rows, []);
+});
+
+test('similar mechanisms group together while each paper keeps its own result', () => {
+  const mechanism = '先用局部约束生成有界候选，再做廉价验证';
+  const field = text => ({ text, state: 'known', evidence: [{ kind: 'paper', page: 1, quote: text }] });
+  const paper = (title, id) => ({ paperId: id, versionId: id + '-v1', title, version: 'v1' });
+  const record = (id, title, { method = mechanism, conditions, outcome, effectCheck, practice, result }) => ({
+    id,
+    paper: paper(title, id),
+    metaMethod: {
+      structuralProblem: field('组合搜索空间过大，穷举不可行'),
+      mechanism: field(method),
+      conditions: field(conditions),
+    },
+    practice: field(practice),
+    ...(outcome ? { experiment: {
+      metric: field('成功率'), comparison: field('对照基线'), data: field(conditions),
+      result: field(result), outcome,
+    } } : { effectCheck }),
+    fields: {
+      name: field(practice), problem: field('组合搜索空间过大，穷举不可行'),
+      pipeline: field(method), conditions: field(conditions),
+    },
+  });
+  const rows = [
+    record('grasp', 'Robot Grasp', { conditions: '候选可被局部约束枚举', outcome: 'effective', practice: '有界抓取生成', result: '成功率从 21 升到 42' }),
+    record('protein', 'Protein Contacts', { conditions: '对照已经包含更强基线', outcome: 'no_improvement', practice: '接触排序', result: '与更强基线相比没有明显提升' }),
+    record('theory', 'Theory Sketch', { conditions: '原文只解释机制', effectCheck: '原论文未验证效果', practice: '未测量的有界提议' }),
+    record('keyword', 'Keyword Index', { method: '按标题关键词检索论文', conditions: '标题共享关键词', outcome: 'failure', practice: '标题关键词索引', result: '检索没有改善任务指标' }),
+    record('spaced', 'Spaced Mechanism', { method: '  先用局部约束生成有界候选，再做廉价验证  ', conditions: '空白只影响书写', outcome: 'failure', practice: '同一机制的另一种写法', result: '失败仍属于这一元方法' }),
+    { id: 'old', paper: paper('Robot Grasp', 'old'), idea: '旧设想', fields: {
+      name: field('旧方法'), problem: field('旧问题'), pipeline: field('旧流程'), conditions: field('旧条件'),
+    } },
+  ];
+  const groups = groupMethodRecords(rows);
+  assert.deepEqual(groups.map(group => group.kind), ['meta', 'meta', 'legacy']);
+  const shared = groups.find(group => group.mechanism === mechanism);
+  assert.deepEqual(shared.rows.map(row => row.id), ['grasp', 'protein', 'theory', 'spaced']);
+  assert.deepEqual(shared.rows.map(row => row.metaMethod.conditions.text), ['候选可被局部约束枚举', '对照已经包含更强基线', '原文只解释机制', '空白只影响书写']);
+  assert.deepEqual(shared.rows.map(row => row.experiment?.outcome || row.effectCheck), ['effective', 'no_improvement', '原论文未验证效果', 'failure']);
+  assert.equal(shared.rows[2].experiment, undefined);
+  assert.notEqual(shared.rows[0].experiment.result.text, shared.rows[1].experiment.result.text);
+  assert.equal(shared.rows[0].experiment.result.evidence[0].quote, '成功率从 21 升到 42');
+  assert.equal(shared.rows[1].practice.evidence[0].quote, '接触排序');
+  assert.equal(shared.rows[0].paper.title, 'Robot Grasp');
+  assert.equal(shared.rows[1].paper.title, 'Protein Contacts');
+  const keyword = groups.find(group => group.mechanism === '按标题关键词检索论文');
+  assert.deepEqual(keyword.rows.map(row => row.id), ['keyword']);
+  assert.equal(groups[2].rows[0].metaMethod, undefined);
+  assert.equal(groups[2].rows[0].fields.name.text, '旧方法');
+  assert.equal(groups[2].rows[0].fields.pipeline.text, '旧流程');
 });
 
 test('import targets accept only the supported public hosts', () => {
