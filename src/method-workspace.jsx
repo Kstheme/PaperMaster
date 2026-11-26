@@ -214,10 +214,14 @@ function TableEditor({ table, onChange, library, defaultConnection, onError }) {
       {message && <p role="status" className="message">{message}</p>}
     </section>
 
-    {preview && <section className="panel">
+    {preview && <section className="panel" aria-label="确认交付">
       <h2>确认交付 · {preview.rows.length} 条</h2>
+      <p className="muted">笔记 Markdown 与 Auto Research JSON 都来自这次确认。确认之后再改方法表，这份快照保持不变。</p>
+      {preview.rows.some(row => row.metaMethod && row.practice) && <p className="muted">
+        这份快照提供具体做法、元方法、适用前提、结果和出处，供下游评估迁移。目标任务、结果预测和实验设计由下游完成。</p>}
       {preview.rows.map(row => <details key={row.id} open className="method-option">
-        <summary>{row.fields.name.text} · {identify(row.paper)}</summary>
+        <summary>{row.fields.name.text} · {identify(row.paper)}{row.experiment ? ' · ' + (outcomes[row.experiment.outcome] || row.experiment.outcome) : ''}{row.effectCheck && !row.experiment ? ' · ' + row.effectCheck : ''}</summary>
+        <MethodEvidence row={row}/>
         <dl>{fields.map(([key, label]) => <div key={key}><dt>{label}</dt><dd><FieldValue field={row.fields[key]}/></dd></div>)}</dl>
         {row.idea && <p>迁移设想 · {row.idea}</p>}
       </details>)}
