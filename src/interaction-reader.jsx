@@ -15,9 +15,10 @@ export function ReadingFigure({ name, job, repo, onRetry, busy, onNote, onTool }
   return <div className="chapter-figure">
     {!data ? <ComponentState name={name} record={record} job={job} onRetry={onRetry} canRetry={!busy && !working(job)}/>
       : name.startsWith('graph') ? <AnimatedGraph graph={data} name={names[name]} repo={repo} onTool={onTool}/>
-        : name.startsWith('formula') ? <FormulaLab demo={data} jobId={job.id} component={name} onNote={onNote}/>
+        : name.startsWith('formula') ? <FormulaLab demo={data} jobId={job.id} component={name} onNote={onNote}
+          evidence={record.source ? <SourcePreview source={record.source} jobId={job.id}/> : null}/>
           : <ExperimentTable table={data} name={names[name]}/>}
-    {record?.source && <SourcePreview source={record.source} jobId={job.id}/>}
+    {record?.source && !(data && name.startsWith('formula')) && <SourcePreview source={record.source} jobId={job.id}/>}
     {data && onTool && !name.startsWith('graph') && <button className="figure-question"
       onClick={() => onTool([data.title, data.latex, data.claim, record.source?.caption].filter(Boolean).join('\n'), { component: name })}>就此图表或公式追问</button>}
   </div>;

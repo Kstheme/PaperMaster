@@ -33,18 +33,33 @@
 .flow-neighbors span { font-size: 13px; color: var(--muted); }
 .flow-neighbors button { font-size: 13px; flex-wrap: wrap; }
 .flow-neighbors small { color: var(--muted); font-weight: 400; }
-.module-detail, .formula-lab, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
+.module-detail, .experiment-table { padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
   border-radius: 9px; background: var(--surface); min-width: 0; }
+.reading-card { display: grid; padding: clamp(14px, 2.4vw, 25px); border: 1px solid var(--line);
+  border-radius: 9px; background: var(--surface); min-width: 0; container-type: inline-size; }
+.reading-card-header, .reading-card-region, .reading-card-body { min-width: 0; }
+.reading-card-header { display: grid; gap: 8px; }
+.reading-card-header h3, .module-detail h3, .experiment-table h3 { margin-top: 4px; font: 700 clamp(22px, 3vw, 28px)/1.24 var(--display); overflow-wrap: anywhere; }
+.reading-card-region { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.reading-card-body { margin-top: 16px; }
+.reading-card-label { margin: 0; color: var(--accent); font: 650 12px/1.3 "Cascadia Mono", Consolas, monospace; }
+.reading-card-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.reading-card-toolbar .actions { flex: 1 1 180px; }
+.reading-card :is(button, summary) { min-height: 44px; }
+.reading-card .lab-input input[type="number"],
+.reading-card .lab-input input[type="range"] { min-height: 44px; }
+.reading-card .prediction { margin: 0; }
+.reading-card .lab-results { margin-block: 0; }
+.reading-card .lab-note { margin-top: 0; }
+.reading-card .source-preview:last-child { border-bottom: 0; padding-bottom: 0; }
 .module-detail { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 18px 28px; }
-.module-detail h3, .formula-lab h3, .experiment-table h3 { margin-top: 4px; font: 700 clamp(22px, 3vw, 28px)/1.24 var(--display); }
 .module-detail dl { display: grid; gap: 3px; margin: 0; }
 .module-detail dl > div { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); }
 .module-detail dl > div:last-child { border-bottom: 0; }
 .module-detail dt { color: var(--accent); font-weight: 650; }
 .module-detail dd { margin: 0; }
 .module-detail dd .markdown > * { margin: 6px 0; }
-.interaction-heading { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; justify-content: space-between; }
-.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); margin: 14px 0; }
+.formula-lab .prediction { padding: 9px 12px; border-left: 2px solid var(--signal); background: var(--signal-tint); }
 .lab-stage { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: clamp(12px, 2vw, 20px); align-items: start; }
 .lab-visual, .lab-inputs { min-width: 0; }
 .lab-visual { padding: 10px; border: 1px solid var(--line); background: var(--inset); border-radius: 8px; }
@@ -92,9 +107,11 @@
 .source-preview img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); }
 @container (max-width: 540px) {
   .module-detail, .lab-stage { grid-template-columns: minmax(0,1fr); }
+  .reading-card .lab-inputs { order: -1; }
+  .reading-card-toolbar > button { flex: 1 1 100%; justify-content: center; }
 }
 @media (max-width: 570px) {
-  .lab-input input[type="range"] { min-height: 32px; }
+  .lab-input input[type="range"] { min-height: 44px; }
 }
 .repository-workbench {
   color-scheme: dark;
