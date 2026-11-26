@@ -284,7 +284,12 @@ progress { width: 100%; height: 7px; accent-color: var(--accent); }
 .reading-highlight-toolbar button[data-color="green"] { background: #b7d39a; }
 .reading-highlight-toolbar button[data-color="blue"] { background: #a9c8ea; }
 .reading-highlight-toolbar button[data-color="rose"] { background: #efb4c0; }
-mark.reading-highlight { color: inherit; border-radius: 2px; padding: 0; }
+.reading-highlight-toolbar button.reading-highlight-write {
+  width: auto; height: auto; min-height: 22px; padding: 2px 10px; border-radius: 999px;
+  background: transparent; font-size: 13px; white-space: nowrap;
+}
+mark.reading-highlight { color: inherit; border-radius: 2px; padding: 0; cursor: pointer; }
+mark.reading-highlight[data-annotated="true"] { text-decoration: underline dotted; text-underline-offset: 3px; }
 mark.reading-highlight[data-color="amber"] { background: #f3d98a; }
 mark.reading-highlight[data-color="green"] { background: #d5ebc4; }
 mark.reading-highlight[data-color="blue"] { background: #d3e4f7; }
@@ -382,4 +387,42 @@ fieldset legend { color: var(--muted); }
   .sample-columns { grid-template-columns: 1fr; }
   button, .tabs button, .chapter-tabs button { min-height: 44px; }
   .slider, .import input { min-height: 44px; }
+}
+.reader.reader-with-annotation { display: flex; align-items: flex-start; }
+.highlight-annotation {
+  flex: 0 0 min(340px, 34vw); position: sticky; top: 16px; align-self: flex-start;
+  max-height: calc(100dvh - 32px); overflow: auto; z-index: 4;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  padding: 14px 14px 16px; box-shadow: 0 12px 32px #342f2114;
+}
+.highlight-annotation-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.highlight-annotation-header h3 { margin: 0; }
+.highlight-annotation-header button, .highlight-annotation .actions button { min-height: 36px; }
+.highlight-annotation .muted + .muted { margin-top: 10px; }
+.highlight-annotation-quote {
+  margin: 6px 0 12px; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+  border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--tint);
+}
+.highlight-annotation-field { margin-bottom: 8px; }
+.highlight-annotation-handle { display: none; }
+.highlight-annotation-backdrop { display: none; }
+@media (max-width: 960px) {
+  .reader.reader-with-annotation { display: block; }
+  .highlight-annotation {
+    position: fixed; z-index: 40; top: 0; right: 0; bottom: 0; left: auto;
+    width: min(360px, 86vw); max-height: none; border-radius: 0; flex: none;
+  }
+}
+@media (max-width: 720px) {
+  .highlight-annotation {
+    top: auto; left: 0; right: 0; bottom: 0; width: auto; height: auto;
+    max-height: min(72dvh, 560px); border-radius: 16px 16px 0 0;
+    box-shadow: 0 -16px 40px #342f2126; padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .highlight-annotation-handle {
+    display: block; width: 40px; height: 4px; margin: 2px auto 10px; border-radius: 4px; background: var(--line-strong);
+  }
+  .highlight-annotation-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 35; padding: 0; border: 0; background: #342f2140;
+  }
 }

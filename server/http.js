@@ -245,6 +245,19 @@ async function route(req, res, url, { library, reader, models, followups, highli
       if (action === 'highlights' && !member && method === 'POST') {
         return json(res, highlights.create(job, await body(req)), 201);
       }
+      if (action === 'highlights' && member && method === 'PATCH') {
+        if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+        const input = await body(req);
+        return json(res, await serialized(() => highlights.saveAnnotation(job, member, input)));
+      }
+      if (action === 'highlights' && member && parts[4] === 'note' && !parts[5] && method === 'POST') {
+        if (!idPattern.test(member)) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+        await body(req);
+        return json(res, await serialized(() => {
+          const passage = highlights.annotationPassage(job, member);
+          return replaceMarkedNote(library, job.references[0].id, '<!-- papermaster:highlight:' + member + ' -->', passage);
+        }));
+      }
       if (action === 'followup-note' && member && method === 'POST') {
         const input = await body(req);
         if (!idPattern.test(input.saveId || '')) throw new AppError('笔记保存标识无效。');
@@ -394,6 +407,23 @@ async function appendNote(library, id, marker, passage) {
     if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
     await writeAtomic(library.path(id, 'note.md'), contents);
   }
+  return readNote(library, id);
+}
+
+async function replaceMarkedNote(library, id, marker, passage) {
+  const note = await readNote(library, id);
+  const block = marker + '\n\n' + passage;
+  const start = note.markdown.indexOf(marker);
+  let contents;
+  if (start < 0) contents = note.markdown.trimEnd() + '\n\n' + block + '\n';
+  else {
+    const next = note.markdown.indexOf('\n<!-- papermaster:', start + marker.length);
+    const end = next < 0 ? note.markdown.length : next;
+    const suffix = note.markdown.slice(end);
+    contents = note.markdown.slice(0, start) + block + (suffix ? (suffix.startsWith('\n') ? suffix : '\n' + suffix) : '\n');
+  }
+  if (contents.length > 300_000) throw new AppError('笔记超过大小限制。可先导出已有内容。');
+  if (contents !== note.markdown) await writeAtomic(library.path(id, 'note.md'), contents);
   return readNote(library, id);
 }
 

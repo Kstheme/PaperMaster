@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { AppError } from './errors.js';
+import { AppError, requiredText } from './errors.js';
+import { markdownText } from './evidence.js';
 import { readingHighlightColors } from './highlight-anchor.js';
 
 const colors = new Set(readingHighlightColors.map(item => item.id));
 const limit = 200;
+const annotationLimit = 8000;
 
 export function highlightService(library) {
   function list(jobId) {
@@ -35,7 +37,40 @@ export function highlightService(library) {
     });
   }
 
-  return { list, create };
+  function saveAnnotation(job, highlightId, input) {
+    const current = owned(job, highlightId);
+    if (!Object.hasOwn(input, 'annotation')) throw new AppError('请写下高亮批注。');
+    const text = annotationText(input.annotation);
+    const next = { ...current };
+    if (!text) delete next.annotation;
+    else next.annotation = { text, updated: new Date().toISOString() };
+    return library.put('highlights', next);
+  }
+
+  function annotationPassage(job, highlightId) {
+    const current = owned(job, highlightId);
+    const paperId = job.references?.[0]?.id;
+    if (job.mode === 'compare' || job.references?.length !== 1 || !paperId || job.status !== 'completed') {
+      throw new AppError('仅可把高亮批注加入这篇论文已完成的主笔记。');
+    }
+    const text = current.annotation?.text;
+    if (typeof text !== 'string' || !text.trim()) throw new AppError('请先写下高亮批注。');
+    const section = Array.isArray(job.sections) && job.sections.find(item => item.key === current.section);
+    const query = new URLSearchParams({
+      paper: paperId, job: job.id, chapter: current.section, highlight: current.id,
+    });
+    const source = '[阅读位置 · ' + markdownText(section?.title || '原文') + '](/?' + query + ')';
+    const quotation = markdownText(current.quote).split('\n').map(line => '> ' + line).join('\n');
+    return ['### 高亮批注', source, quotation, text].join('\n\n');
+  }
+
+  function owned(job, highlightId) {
+    const current = library.get('highlights', highlightId);
+    if (!current || current.jobId !== job.id) throw new AppError('阅读高亮不属于这份阅读记录。', 404);
+    return current;
+  }
+
+  return { list, create, saveAnnotation, annotationPassage };
 }
 
 function passage(value, label, max) {
@@ -47,6 +82,13 @@ function context(value) {
   if (value == null || value === '') return '';
   if (typeof value !== 'string' || value.length > 80) throw new AppError('选区上下文无效。');
   return value;
+}
+
+function annotationText(value) {
+  if (value == null || value === '') return '';
+  if (typeof value !== 'string') throw new AppError(`高亮批注需要 1–${annotationLimit} 个字符。`);
+  if (!value.trim()) return '';
+  return requiredText(value, '高亮批注', annotationLimit);
 }
 
 function sectionContains(markdown, quote) {
